@@ -196,6 +196,30 @@ class CmReservation extends Model
         return $this->checkout?->format('d/m/Y') ?? '—';
     }
 
+    public function isRecentlyReceived(int $minutes = 30): bool
+    {
+        return $this->created_at !== null && $this->created_at->greaterThan(now()->subMinutes($minutes));
+    }
+
+    public function paymentBadgeClass(): string
+    {
+        $label = strtolower($this->paymentLabel());
+
+        if ($label === '—') {
+            return 'lb-pay-neutral';
+        }
+
+        if (str_contains($label, 'prepaid') || str_contains($label, 'paid')) {
+            return 'lb-pay-prepaid';
+        }
+
+        if (str_contains($label, 'hotel')) {
+            return 'lb-pay-pah';
+        }
+
+        return 'lb-pay-neutral';
+    }
+
     public function statusBadgeClass(): string
     {
         return match ($this->status) {
@@ -212,5 +236,53 @@ class CmReservation extends Model
             self::STATUS_MODIFIED => 'Modified',
             default => 'Confirmed',
         };
+    }
+
+    /** @return array{summary: array<string, mixed>, raw: array<string, mixed>} */
+    public function detailForView(): array
+    {
+        $raw = is_array($this->payload) ? $this->payload : [];
+
+        if ($raw === []) {
+            $raw = [
+                'action' => $this->action,
+                'hotelCode' => $this->hotel_code,
+                'channel' => $this->channel,
+                'bookingId' => $this->booking_id,
+                'checkin' => $this->checkin?->format('Y-m-d'),
+                'checkout' => $this->checkout?->format('Y-m-d'),
+                'guest' => array_filter([
+                    'firstName' => $this->guest_first_name,
+                    'lastName' => $this->guest_last_name,
+                ]),
+                'amount' => array_filter([
+                    'amountAfterTax' => $this->amount_after_tax,
+                    'amountBeforeTax' => $this->amount_before_tax,
+                    'tax' => $this->tax,
+                    'currency' => $this->currency,
+                ]),
+                'rooms' => $this->rooms,
+            ];
+        }
+
+        return [
+            'summary' => array_filter([
+                'Booking ID' => $this->booking_id,
+                'Status' => $this->statusLabel(),
+                'Channel' => $this->channel,
+                'Guest' => $this->guestName(),
+                'Payment' => $this->paymentLabel(),
+                'Booked on' => $this->bookedOnLabel(),
+                'Check-in' => $this->checkinLabel(),
+                'Check-out' => $this->checkoutLabel(),
+                'Room' => $this->roomLabel(),
+                'Room nights' => $this->roomNightCount(),
+                'Rooms count' => $this->roomCount() ?: null,
+                'Meal plan' => $this->mealPlanLabel() !== '—' ? $this->mealPlanLabel() : null,
+                'Price' => $this->priceLabel() !== '—' ? $this->priceLabel() : null,
+                'Hotel code' => $this->hotel_code,
+            ], fn ($value) => $value !== null && $value !== '' && $value !== '—'),
+            'raw' => $raw,
+        ];
     }
 }

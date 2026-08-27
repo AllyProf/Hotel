@@ -30,10 +30,15 @@ class LiveBookingsController extends Controller
             ->paginate(20)
             ->withQueryString();
 
+        $bookingDetails = $bookings->getCollection()
+            ->mapWithKeys(fn (CmReservation $booking) => [(string) $booking->id => $booking->detailForView()])
+            ->all();
+
         return view('hotel.channel-manager.live-bookings', [
             'hotel' => $hotel,
             'hotelCode' => $hotelCode,
             'bookings' => $bookings,
+            'bookingDetails' => $bookingDetails,
             'webhookUrl' => config('app.url').'/webhooks/cm/reservations',
             'filters' => $filters,
         ]);
@@ -128,7 +133,7 @@ class LiveBookingsController extends Controller
             'from_date' => $request->input('from_date', now()->subDays(7)->format('Y-m-d')),
             'to_date' => $request->input('to_date', now()->format('Y-m-d')),
             'search' => trim((string) $request->input('search', '')),
-            'show_cancelled' => $request->boolean('show_cancelled'),
+            'cancelled_only' => $request->boolean('cancelled_only'),
         ];
     }
 
@@ -157,8 +162,8 @@ class LiveBookingsController extends Controller
             $query->where($dateColumn, '<=', $to);
         }
 
-        if (! $filters['show_cancelled']) {
-            $query->where('status', '!=', CmReservation::STATUS_CANCELLED);
+        if ($filters['cancelled_only']) {
+            $query->where('status', CmReservation::STATUS_CANCELLED);
         }
 
         if ($filters['search'] !== '') {

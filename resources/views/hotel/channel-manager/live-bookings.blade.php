@@ -94,15 +94,168 @@
       border-radius: 4px;
       padding: 12px;
       font-size: 12px;
-      max-height: 360px;
+      max-height: 220px;
       overflow: auto;
       white-space: pre-wrap;
       word-break: break-word;
+      margin-bottom: 0;
+    }
+    .lb-detail-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+    .lb-detail-table th,
+    .lb-detail-table td {
+      border: 1px solid #e5e7eb;
+      padding: 8px 10px;
+      font-size: 13px;
+      vertical-align: top;
+    }
+    .lb-detail-table th {
+      width: 34%;
+      background: #f9fafb;
+      color: #374151;
+      font-weight: 700;
+    }
+    .lb-detail-raw summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      color: #940000;
+      margin-bottom: 8px;
+    }
+    .lb-channel {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 100%;
+    }
+    .lb-channel__live {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+      animation: lb-live-pulse 1.8s infinite;
+      flex-shrink: 0;
+    }
+    @keyframes lb-live-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+      70% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+    }
+    .lb-channel__chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px 4px 4px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--lb-brand) 28%, #fff);
+      background: color-mix(in srgb, var(--lb-brand) 10%, #fff);
+      min-height: 32px;
+      max-width: 100%;
+    }
+    .lb-channel__logo {
+      width: 24px;
+      height: 24px;
+      object-fit: contain;
+      border-radius: 50%;
+      background: #fff;
+      padding: 2px;
+      flex-shrink: 0;
+    }
+    .lb-channel__fallback {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--lb-brand);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .lb-channel__name {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--lb-brand);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 120px;
+    }
+    .lb-table tbody tr.is-live td {
+      background: #fcfffc;
+    }
+    .lb-table tbody tr.is-live td:first-child {
+      box-shadow: inset 3px 0 0 var(--lb-brand, #940000);
+    }
+    .lb-booking-id {
+      font-size: 12px;
+      font-weight: 600;
+      color: #333;
+      background: #f3f4f6;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
+    .lb-pay {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .lb-pay-prepaid { background: #ecfdf3; color: #047857; border: 1px solid #bbf7d0; }
+    .lb-pay-pah { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+    .lb-pay-neutral { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }
+    .lb-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .lb-status.is-confirmed { background: #ecfdf3; color: #047857; border: 1px solid #bbf7d0; }
+    .lb-status.is-modified { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+    .lb-status.is-cancelled { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
+    .lb-price {
+      font-weight: 700;
+      color: #111827;
+    }
+    .lb-meal {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #eef2ff;
+      color: #3730a3;
+      border: 1px solid #c7d2fe;
+    }
+    .btn-lb-view {
+      color: #940000 !important;
+      border-color: #940000 !important;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .btn-lb-view:hover {
+      background: #940000 !important;
+      color: #fff !important;
     }
   </style>
 @endpush
 
 @section('content')
+  @inject('otaLogos', 'App\Services\OtaLogoService')
+
   <div class="app-title">
     <div>
       <h1><i class="fa fa-columns"></i> Live Bookings</h1>
@@ -164,14 +317,14 @@
               </div>
               <div class="form-check mt-4">
                 <label class="form-check-label">
-                  <input type="checkbox" class="form-check-input" name="show_cancelled" value="1"
-                    {{ $filters['show_cancelled'] ? 'checked' : '' }}>
-                  Cancelled Bookings
+                  <input type="checkbox" class="form-check-input" name="cancelled_only" value="1"
+                    {{ $filters['cancelled_only'] ? 'checked' : '' }}>
+                  Cancelled only
                 </label>
               </div>
               <div class="mt-4">
                 <button type="submit" class="btn btn-sm btn-light border">Apply</button>
-                @if($filters['search'] || $filters['show_cancelled'] || $filters['from_date'] !== now()->subDays(7)->format('Y-m-d') || $filters['to_date'] !== now()->format('Y-m-d'))
+                @if($filters['search'] || $filters['cancelled_only'] || $filters['from_date'] !== now()->subDays(7)->format('Y-m-d') || $filters['to_date'] !== now()->format('Y-m-d'))
                   <a class="btn btn-sm btn-link" href="{{ route('hotel.channel-manager.live-bookings') }}">Reset</a>
                 @endif
               </div>
@@ -216,24 +369,45 @@
             </thead>
             <tbody>
               @forelse($bookings as $booking)
-                <tr class="{{ $booking->isCancelled() ? 'is-cancelled' : '' }}">
-                  <td>{{ $booking->channel }}</td>
-                  <td><code>{{ $booking->booking_id }}</code></td>
-                  <td>{{ $booking->guestName() }}</td>
-                  <td>{{ $booking->paymentLabel() }}</td>
+                @php
+                  $channelBrand = $otaLogos->presentationForChannel($booking->channel);
+                  $isLive = $booking->isRecentlyReceived();
+                @endphp
+                <tr class="{{ $booking->isCancelled() ? 'is-cancelled' : '' }}{{ $isLive && ! $booking->isCancelled() ? ' is-live' : '' }}"
+                  @if($isLive && ! $booking->isCancelled()) style="--lb-brand: {{ $channelBrand['brand_color'] }};" @endif>
+                  <td>
+                    @include('hotel.channel-manager.partials._lb-channel-badge', [
+                      'brand' => $channelBrand,
+                      'channel' => $booking->channel,
+                      'isLive' => $isLive && ! $booking->isCancelled(),
+                    ])
+                  </td>
+                  <td><span class="lb-booking-id">{{ $booking->booking_id }}</span></td>
+                  <td><strong>{{ $booking->guestName() }}</strong></td>
+                  <td><span class="lb-pay {{ $booking->paymentBadgeClass() }}">{{ $booking->paymentLabel() }}</span></td>
                   <td>{{ $booking->bookedOnLabel() }}</td>
                   <td>{{ $booking->checkinLabel() }}</td>
                   <td>{{ $booking->checkoutLabel() }}</td>
                   <td>{{ $booking->roomLabel() }}</td>
                   <td>{{ $booking->roomNightCount() ?? '—' }}</td>
                   <td>{{ $booking->roomCount() ?: '—' }}</td>
-                  <td>{{ $booking->mealPlanLabel() }}</td>
-                  <td>{{ $booking->priceLabel() }}</td>
-                  <td><span class="badge {{ $booking->statusBadgeClass() }}">{{ $booking->statusLabel() }}</span></td>
                   <td>
-                    <button type="button" class="btn btn-sm btn-outline-secondary js-lb-view"
+                    @if($booking->mealPlanLabel() !== '—')
+                      <span class="lb-meal">{{ $booking->mealPlanLabel() }}</span>
+                    @else
+                      —
+                    @endif
+                  </td>
+                  <td><span class="lb-price">{{ $booking->priceLabel() }}</span></td>
+                  <td>
+                    <span class="lb-status {{ $booking->status === 'cancelled' ? 'is-cancelled' : ($booking->status === 'modified' ? 'is-modified' : 'is-confirmed') }}">
+                      {{ $booking->statusLabel() }}
+                    </span>
+                  </td>
+                  <td>
+                    <button type="button" class="btn btn-sm btn-outline-secondary btn-lb-view js-lb-view"
                       data-booking-id="{{ $booking->booking_id }}"
-                      data-payload="{{ e(json_encode($booking->payload ?? [], JSON_UNESCAPED_UNICODE)) }}">
+                      data-record-id="{{ $booking->id }}">
                       View
                     </button>
                   </td>
@@ -270,7 +444,11 @@
           </button>
         </div>
         <div class="modal-body">
-          <pre class="lb-modal-pre" id="lbModalPayload"></pre>
+          <div id="lbModalSummary"></div>
+          <details class="lb-detail-raw mt-3">
+            <summary>Raw webhook payload</summary>
+            <pre class="lb-modal-pre" id="lbModalPayload"></pre>
+          </details>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
@@ -281,20 +459,36 @@
 @endsection
 
 @push('scripts')
+  <script type="application/json" id="lb-bookings-data">@json($bookingDetails)</script>
   <script>
-    document.querySelectorAll('.js-lb-view').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var payload = {};
-        try {
-          payload = JSON.parse(btn.getAttribute('data-payload') || '{}');
-        } catch (e) {
-          payload = {};
-        }
+    (function () {
+      var details = {};
+      try {
+        details = JSON.parse(document.getElementById('lb-bookings-data').textContent || '{}');
+      } catch (e) {
+        details = {};
+      }
 
-        document.getElementById('lbModalBookingId').textContent = btn.getAttribute('data-booking-id') || '';
-        document.getElementById('lbModalPayload').textContent = JSON.stringify(payload, null, 2);
-        $('#lbDetailModal').modal('show');
+      function renderSummary(summary) {
+        var html = '<table class="lb-detail-table"><tbody>';
+        Object.keys(summary || {}).forEach(function (key) {
+          html += '<tr><th>' + key + '</th><td>' + String(summary[key]) + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        return html;
+      }
+
+      document.querySelectorAll('.js-lb-view').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var recordId = btn.getAttribute('data-record-id');
+          var detail = details[recordId] || { summary: {}, raw: {} };
+
+          document.getElementById('lbModalBookingId').textContent = btn.getAttribute('data-booking-id') || '';
+          document.getElementById('lbModalSummary').innerHTML = renderSummary(detail.summary || {});
+          document.getElementById('lbModalPayload').textContent = JSON.stringify(detail.raw || {}, null, 2);
+          $('#lbDetailModal').modal('show');
+        });
       });
-    });
+    })();
   </script>
 @endpush
