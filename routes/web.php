@@ -59,6 +59,7 @@ Route::middleware(['auth', 'hotel.user'])->prefix('hotel')->name('hotel.')->grou
         Route::get('/bulk-update', [BulkUpdateController::class, 'index'])->name('bulk-update');
         Route::post('/bulk-update', [BulkUpdateController::class, 'store'])->name('bulk-update.store');
         Route::get('/live-bookings', [LiveBookingsController::class, 'index'])->name('live-bookings');
+        Route::get('/live-bookings/poll', [LiveBookingsController::class, 'poll'])->name('live-bookings.poll');
         Route::get('/live-bookings/export', [LiveBookingsController::class, 'export'])->name('live-bookings.export');
         Route::post('/live-bookings/sync', [LiveBookingsController::class, 'sync'])->name('live-bookings.sync');
         Route::get('/ota-mapping', [OtaMappingController::class, 'index'])->name('ota-mapping');

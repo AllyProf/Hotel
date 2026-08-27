@@ -250,6 +250,27 @@
       background: #940000 !important;
       color: #fff !important;
     }
+    .lb-live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #047857;
+      background: #ecfdf3;
+      border: 1px solid #bbf7d0;
+      border-radius: 999px;
+      padding: 4px 12px;
+    }
+    .lb-live-badge__dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      animation: lb-live-pulse 1.8s infinite;
+    }
+    .lb-live-badge.is-checking { color: #6b7280; background: #f3f4f6; border-color: #e5e7eb; }
+    .lb-live-badge.is-checking .lb-live-badge__dot { background: #9ca3af; animation: none; }
   </style>
 @endpush
 
@@ -259,7 +280,13 @@
   <div class="app-title">
     <div>
       <h1><i class="fa fa-columns"></i> Live Bookings</h1>
-      <p>OTA reservations received from Channel Manager</p>
+      <p>OTA reservations received from Channel Manager · auto-refreshes every 30 seconds</p>
+    </div>
+    <div class="d-flex align-items-center" style="gap:12px;">
+      <span class="lb-live-badge" id="lbLiveBadge">
+        <span class="lb-live-badge__dot"></span>
+        <span id="lbLiveBadgeText">Live</span>
+      </span>
     </div>
     <ul class="app-breadcrumb breadcrumb">
       <li class="breadcrumb-item"><i class="fa fa-home fa-lg"></i></li>
@@ -489,6 +516,45 @@
           $('#lbDetailModal').modal('show');
         });
       });
+
+      var pollUrl = @json(route('hotel.channel-manager.live-bookings.poll'));
+      var lastSignature = @json($pollSignature);
+      var pollMs = 30000;
+      var liveBadge = document.getElementById('lbLiveBadge');
+      var liveBadgeText = document.getElementById('lbLiveBadgeText');
+
+      function pollBookings() {
+        if ($('#lbDetailModal').hasClass('show')) {
+          return;
+        }
+
+        liveBadge.classList.add('is-checking');
+        liveBadgeText.textContent = 'Checking…';
+
+        fetch(pollUrl + window.location.search, {
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          credentials: 'same-origin'
+        })
+          .then(function (response) { return response.json(); })
+          .then(function (data) {
+            if (data.signature && data.signature !== lastSignature) {
+              window.location.reload();
+              return;
+            }
+
+            liveBadge.classList.remove('is-checking');
+            liveBadgeText.textContent = 'Live';
+          })
+          .catch(function () {
+            liveBadge.classList.remove('is-checking');
+            liveBadgeText.textContent = 'Live';
+          });
+      }
+
+      setInterval(pollBookings, pollMs);
     })();
   </script>
 @endpush

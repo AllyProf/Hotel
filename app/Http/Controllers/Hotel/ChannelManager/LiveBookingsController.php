@@ -8,6 +8,7 @@ use App\Services\ChannelManager\ChannelManagerCodeResolver;
 use App\Services\CmReservationService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -34,14 +35,26 @@ class LiveBookingsController extends Controller
             ->mapWithKeys(fn (CmReservation $booking) => [(string) $booking->id => $booking->detailForView()])
             ->all();
 
+        $pollState = $this->pollState($hotel->id, $hotelCode, $filters);
+
         return view('hotel.channel-manager.live-bookings', [
             'hotel' => $hotel,
             'hotelCode' => $hotelCode,
             'bookings' => $bookings,
             'bookingDetails' => $bookingDetails,
+            'pollSignature' => $pollState['signature'],
             'webhookUrl' => config('app.url').'/webhooks/cm/reservations',
             'filters' => $filters,
         ]);
+    }
+
+    public function poll(Request $request): JsonResponse
+    {
+        $hotel = auth()->user()->hotel()->firstOrFail();
+        $hotelCode = $this->codes->hotelCode($hotel);
+        $filters = $this->filtersFromRequest($request);
+
+        return response()->json($this->pollState($hotel->id, $hotelCode, $filters));
     }
 
     public function export(Request $request): StreamedResponse
@@ -178,5 +191,33 @@ class LiveBookingsController extends Controller
 
         return $query->orderByDesc($dateColumn === 'created_at' ? 'created_at' : $dateColumn)
             ->orderByDesc('id');
+    }
+
+    /** @param  array<string, mixed>  $filters */
+    private function pollState(int $hotelId, string $hotelCode, array $filters): array
+    {
+        $baseQuery = $this->filteredQuery($hotelId, $hotelCode, $filters);
+        $total = (clone $baseQuery)->count();
+
+        $latest = (clone $baseQuery)
+            ->reorder()
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->first(['id', 'booking_id', 'status', 'updated_at']);
+
+        $signature = hash('xxh128', implode('|', [
+            $total,
+            $latest?->id,
+            $latest?->updated_at?->timestamp,
+            $latest?->status,
+        ]));
+
+        return [
+            'signature' => $signature,
+            'total' => $total,
+            'latest_booking_id' => $latest?->booking_id,
+            'latest_status' => $latest?->status,
+            'checked_at' => now()->toIso8601String(),
+        ];
     }
 }
