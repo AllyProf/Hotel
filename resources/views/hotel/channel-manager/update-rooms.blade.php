@@ -146,19 +146,67 @@
     .update-rooms-open-toggle.is-partial {
       background: #f1c40f;
     }
+    .update-rooms-count-cell {
+      padding: 6px 4px;
+    }
+    .update-rooms-count-wrap {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      min-width: 84px;
+    }
     .update-rooms-count-input {
-      width: 56px;
-      margin: 0 auto;
+      width: 46px;
+      margin: 0;
       text-align: center;
       font-weight: 600;
       border: 1px solid rgba(0,0,0,.2);
       border-radius: 2px;
-      padding: 4px 6px;
+      padding: 4px 4px;
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+    .update-rooms-count-input::-webkit-outer-spin-button,
+    .update-rooms-count-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
     }
     .update-rooms-count-input:focus {
       border-color: #1877f2;
       outline: none;
       box-shadow: 0 0 0 2px rgba(24, 119, 242, 0.15);
+    }
+    .update-rooms-step {
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border: 1px solid #cfd4da;
+      border-radius: 2px;
+      background: #fff;
+      color: #555;
+      font-size: 14px;
+      line-height: 1;
+      font-weight: 700;
+      cursor: pointer;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .15s ease, visibility .15s ease, background .15s ease;
+    }
+    .update-rooms-count-cell:hover .update-rooms-step,
+    .update-rooms-count-wrap:focus-within .update-rooms-step {
+      opacity: 1;
+      visibility: visible;
+    }
+    .update-rooms-step:hover {
+      background: #f3f4f6;
+      border-color: #b8bec5;
+    }
+    .update-rooms-summary-value {
+      display: inline-block;
+      min-width: 28px;
+      font-weight: 700;
+      color: #333;
     }
     .btn-update-rooms-save {
       background: #1877f2 !important;
@@ -321,16 +369,20 @@
                     <tr class="room-row" data-room-id="{{ $room['id'] }}">
                       <td class="room-col">{{ $room['name'] }}</td>
                       @foreach($grid['dateKeys'] as $dateKey)
-                        <td>
-                          <input type="number"
-                            class="update-rooms-count-input js-room-count"
-                            name="rooms[{{ $room['id'] }}][{{ $dateKey }}]"
-                            value="{{ $room['counts'][$dateKey] }}"
-                            min="0"
-                            max="999"
-                            data-original="{{ $room['counts'][$dateKey] }}"
-                            data-date="{{ $dateKey }}"
-                            required>
+                        <td class="update-rooms-count-cell">
+                          <div class="update-rooms-count-wrap">
+                            <button type="button" class="update-rooms-step js-room-step" data-step="-1" aria-label="Decrease">−</button>
+                            <input type="number"
+                              class="update-rooms-count-input js-room-count"
+                              name="rooms[{{ $room['id'] }}][{{ $dateKey }}]"
+                              value="{{ $room['counts'][$dateKey] }}"
+                              min="0"
+                              max="999"
+                              data-original="{{ $room['counts'][$dateKey] }}"
+                              data-date="{{ $dateKey }}"
+                              required>
+                            <button type="button" class="update-rooms-step js-room-step" data-step="1" aria-label="Increase">+</button>
+                          </div>
                         </td>
                       @endforeach
                     </tr>
@@ -339,7 +391,9 @@
                   <tr class="summary-row">
                     <td class="room-col">Total Available Rooms</td>
                     @foreach($grid['dateKeys'] as $dateKey)
-                      <td class="js-total-cell" data-date="{{ $dateKey }}">{{ $grid['totals'][$dateKey] }}</td>
+                      <td class="js-total-cell" data-date="{{ $dateKey }}">
+                        <span class="update-rooms-summary-value">{{ $grid['totals'][$dateKey] }}</span>
+                      </td>
                     @endforeach
                   </tr>
 
@@ -481,7 +535,12 @@
 
         table.querySelectorAll('.js-total-cell').forEach(function (cell) {
           var date = cell.getAttribute('data-date');
-          cell.textContent = totals[date] || 0;
+          var valueNode = cell.querySelector('.update-rooms-summary-value');
+          if (valueNode) {
+            valueNode.textContent = totals[date] || 0;
+          } else {
+            cell.textContent = totals[date] || 0;
+          }
         });
 
         table.querySelectorAll('.js-occupancy-cell').forEach(function (cell) {
@@ -496,6 +555,22 @@
           if (isNaN(value) || value < 0) this.value = 0;
           if (value > 999) this.value = 999;
           recalculateTotals();
+        });
+      });
+
+      table.querySelectorAll('.js-room-step').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var wrap = btn.closest('.update-rooms-count-wrap');
+          if (!wrap) return;
+          var input = wrap.querySelector('.js-room-count');
+          if (!input) return;
+          var step = parseInt(btn.getAttribute('data-step'), 10) || 0;
+          var value = parseInt(input.value, 10);
+          if (isNaN(value)) value = 0;
+          value = Math.max(0, Math.min(999, value + step));
+          input.value = value;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
         });
       });
 

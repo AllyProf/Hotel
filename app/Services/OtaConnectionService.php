@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Hotel;
 use App\Models\HotelSetting;
+use App\Services\ChannelManager\AiosellPayloadBuilder;
 
 class OtaConnectionService
 {
@@ -54,6 +55,45 @@ class OtaConnectionService
     public function configuredSlugs(Hotel $hotel): array
     {
         return array_column($this->configured($hotel), 'slug');
+    }
+
+    /** @return list<array{label: string, value: string, slug: string}> */
+    public function syncChannelOptions(Hotel $hotel): array
+    {
+        $options = [];
+
+        foreach ($this->configured($hotel) as $ota) {
+            $slug = (string) ($ota['slug'] ?? '');
+
+            if ($slug === '') {
+                continue;
+            }
+
+            $options[] = [
+                'label' => (string) ($ota['name'] ?? $slug),
+                'value' => AiosellPayloadBuilder::toAiosellChannel($slug),
+                'slug' => $slug,
+            ];
+        }
+
+        $hotel->loadMissing('settings');
+        $whatsapp = is_array($hotel->settings?->whatsapp) ? $hotel->settings->whatsapp : [];
+
+        if (! empty($whatsapp['enabled']) || ! empty($whatsapp['facebook_connected'])) {
+            $options[] = [
+                'label' => 'Whatsapp',
+                'value' => 'whatsapp',
+                'slug' => 'whatsapp',
+            ];
+        }
+
+        return $options;
+    }
+
+    /** @return list<string> */
+    public function syncChannelValues(Hotel $hotel): array
+    {
+        return array_column($this->syncChannelOptions($hotel), 'value');
     }
 
     /** @param array<string, mixed> $data */

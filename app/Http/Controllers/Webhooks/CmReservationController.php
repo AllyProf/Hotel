@@ -70,6 +70,32 @@ class CmReservationController extends Controller
         $providedUser = $request->getUser();
         $providedPass = $request->getPassword();
 
-        return $providedUser === $username && $providedPass === $expected;
+        if ($providedUser === null || $providedPass === null) {
+            [$providedUser, $providedPass] = $this->basicAuthFromHeader($request);
+        }
+
+        return $providedUser === $username && hash_equals($expected, (string) $providedPass);
+    }
+
+    /** @return array{0: string, 1: string} */
+    private function basicAuthFromHeader(Request $request): array
+    {
+        $header = (string) $request->header('Authorization', '');
+
+        if ($header === '') {
+            $header = (string) ($request->server->get('HTTP_AUTHORIZATION') ?? '');
+        }
+
+        if (! preg_match('/^Basic\s+(.+)$/i', $header, $matches)) {
+            return ['', ''];
+        }
+
+        $decoded = base64_decode($matches[1], true);
+
+        if ($decoded === false || ! str_contains($decoded, ':')) {
+            return ['', ''];
+        }
+
+        return explode(':', $decoded, 2);
     }
 }

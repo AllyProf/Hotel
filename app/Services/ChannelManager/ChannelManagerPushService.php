@@ -5,6 +5,8 @@ namespace App\Services\ChannelManager;
 use App\Models\Hotel;
 use App\Models\HotelRatePlan;
 use App\Models\HotelRoomInventory;
+use App\Services\HotelSettingsService;
+use App\Services\OtaConnectionService;
 use App\Services\RateInventoryService;
 use App\Services\RoomInventoryService;
 use Carbon\Carbon;
@@ -19,6 +21,8 @@ class ChannelManagerPushService
         private ChannelManagerPropertyService $propertyService,
         private RoomInventoryService $inventoryService,
         private RateInventoryService $rateInventory,
+        private HotelSettingsService $settingsService,
+        private OtaConnectionService $otaConnections,
     ) {}
 
     public function canPush(): bool
@@ -189,6 +193,18 @@ class ChannelManagerPushService
                 : 'Rate sync failed: '.$this->friendlyMessage((string) ($result['rates']['message'] ?? ''));
         }
 
+        if ($result['inventory_restrictions'] ?? null) {
+            $parts[] = ($result['inventory_restrictions']['success'] ?? false)
+                ? 'Inventory restrictions synced to Channel Manager.'
+                : 'Inventory restriction sync failed: '.$this->friendlyMessage((string) ($result['inventory_restrictions']['message'] ?? ''));
+        }
+
+        if ($result['rate_restrictions'] ?? null) {
+            $parts[] = ($result['rate_restrictions']['success'] ?? false)
+                ? 'Rate restrictions synced to Channel Manager.'
+                : 'Rate restriction sync failed: '.$this->friendlyMessage((string) ($result['rate_restrictions']['message'] ?? ''));
+        }
+
         if ($parts === []) {
             return '';
         }
@@ -205,8 +221,10 @@ class ChannelManagerPushService
 
         $inventoryOk = $result['inventory'] === null || ($result['inventory']['success'] ?? false);
         $ratesOk = $result['rates'] === null || ($result['rates']['success'] ?? false);
+        $inventoryRestrictionsOk = ($result['inventory_restrictions'] ?? null) === null || ($result['inventory_restrictions']['success'] ?? false);
+        $rateRestrictionsOk = ($result['rate_restrictions'] ?? null) === null || ($result['rate_restrictions']['success'] ?? false);
 
-        if ($inventoryOk && $ratesOk) {
+        if ($inventoryOk && $ratesOk && $inventoryRestrictionsOk && $rateRestrictionsOk) {
             $note = trim($this->flashSuffix($result));
 
             return [
@@ -504,6 +522,269 @@ class ChannelManagerPushService
         }
 
         return $updates;
+    }
+
+    /**
+     * @param  list<string>  $channels
+     * @return array{success: bool, http_code: int|null, message: string, response: mixed}
+     */
+    public function pushInventoryRestrictions(Hotel $hotel, Carbon $startDate, Carbon $endDate, array $channels = ['all'], bool $skipMapping = false): array
+    {
+        if (! $skipMapping && ! $this->prepareSandboxMapping($hotel)) {
+            return $this->mappingFailureResult();
+        }
+
+        $settings = $this->settingsService->ensureDefaults($hotel);
+        $rateplan = is_array($settings->rateplan) ? $settings->rateplan : [];
+        $stored = is_array($rateplan['inventory_restrictions'] ?? null) ? $rateplan['inventory_restrictions'] : [];
+        $dateKeys = collect(CarbonPeriod::create($startDate->copy()->startOfDay(), $endDate->copy()->startOfDay()))
+            ->map(fn (Carbon $d) => $d->format('Y-m-d'))
+            ->values()
+            ->all();
+
+        $hotel->load(['rooms' => fn ($q) => $q->where('is_enabled', true)->orderBy('rank')->orderBy('id')]);
+        $dailyPayloads = [];
+
+        foreach ($dateKeys as $dateKey) {
+            $roomsPayload = [];
+
+            foreach ($hotel->rooms as $room) {
+                $restrictionRow = $stored[(string) $room->id][$dateKey] ?? null;
+
+                if (! is_array($restrictionRow)) {
+                    continue;
+                }
+
+                $roomsPayload[] = [
+                    'roomCode' => $this->codes->roomCode($hotel, $room),
+                    'restrictions' => AiosellPayloadBuilder::fromInternalRestriction($restrictionRow),
+                ];
+            }
+
+            if ($roomsPayload !== []) {
+                usort($roomsPayload, fn ($a, $b) => strcmp($a['roomCode'], $b['roomCode']));
+                $dailyPayloads[$dateKey] = $roomsPayload;
+            }
+        }
+
+        if ($dailyPayloads === []) {
+            return [
+                'success' => false,
+                'http_code' => null,
+                'message' => 'No inventory restrictions to push for the selected range.',
+                'response' => null,
+            ];
+        }
+
+        $payload = [
+            'hotelCode' => $this->codes->hotelCode($hotel),
+            'toChannels' => AiosellPayloadBuilder::toAiosellChannels($channels),
+            'updates' => $this->mergeRestrictionUpdates($dailyPayloads, 'rooms'),
+        ];
+
+        return $this->client->pushInventoryRestrictions($payload);
+    }
+
+    /**
+     * @param  list<string>  $channels
+     * @return array{success: bool, http_code: int|null, message: string, response: mixed}
+     */
+    public function pushRateRestrictions(Hotel $hotel, Carbon $startDate, Carbon $endDate, array $channels = ['all'], bool $skipMapping = false): array
+    {
+        if (! $skipMapping && ! $this->prepareSandboxMapping($hotel)) {
+            return $this->mappingFailureResult();
+        }
+
+        $settings = $this->settingsService->ensureDefaults($hotel);
+        $rateplan = is_array($settings->rateplan) ? $settings->rateplan : [];
+        $stored = is_array($rateplan['rate_restrictions'] ?? null) ? $rateplan['rate_restrictions'] : [];
+        $dateKeys = collect(CarbonPeriod::create($startDate->copy()->startOfDay(), $endDate->copy()->startOfDay()))
+            ->map(fn (Carbon $d) => $d->format('Y-m-d'))
+            ->values()
+            ->all();
+
+        $plans = HotelRatePlan::query()
+            ->where('hotel_id', $hotel->id)
+            ->with('room')
+            ->get()
+            ->filter(fn (HotelRatePlan $plan) => $plan->room !== null);
+
+        $dailyPayloads = [];
+
+        foreach ($dateKeys as $dateKey) {
+            $ratesPayload = [];
+
+            foreach ($plans as $plan) {
+                $restrictionRow = $stored[(string) $plan->id][$dateKey] ?? null;
+
+                if (! is_array($restrictionRow)) {
+                    continue;
+                }
+
+                $ratesPayload[] = [
+                    'roomCode' => $this->codes->roomCode($hotel, $plan->room),
+                    'rateplanCode' => $this->codes->rateplanCode($hotel, $plan),
+                    'restrictions' => AiosellPayloadBuilder::fromInternalRestriction($restrictionRow),
+                ];
+            }
+
+            if ($ratesPayload !== []) {
+                usort($ratesPayload, fn ($a, $b) => strcmp($a['rateplanCode'], $b['rateplanCode']));
+                $dailyPayloads[$dateKey] = $ratesPayload;
+            }
+        }
+
+        if ($dailyPayloads === []) {
+            return [
+                'success' => false,
+                'http_code' => null,
+                'message' => 'No rate restrictions to push for the selected range.',
+                'response' => null,
+            ];
+        }
+
+        $payload = [
+            'hotelCode' => $this->codes->hotelCode($hotel),
+            'toChannels' => AiosellPayloadBuilder::toAiosellChannels($channels),
+            'updates' => $this->mergeRestrictionUpdates($dailyPayloads, 'rates'),
+        ];
+
+        return $this->client->pushRateRestrictions($payload);
+    }
+
+    /**
+     * @param  array<string, list<array<string, mixed>>>  $dailyPayloads
+     * @return list<array<string, mixed>>
+     */
+    private function mergeRestrictionUpdates(array $dailyPayloads, string $key): array
+    {
+        $dates = array_keys($dailyPayloads);
+        sort($dates);
+
+        if ($dates === []) {
+            return [];
+        }
+
+        $updates = [];
+        $rangeStart = $dates[0];
+        $rangeEnd = $dates[0];
+        $signature = json_encode($dailyPayloads[$dates[0]]);
+
+        for ($index = 1; $index < count($dates); $index++) {
+            $dateKey = $dates[$index];
+            $nextSignature = json_encode($dailyPayloads[$dateKey]);
+
+            if ($nextSignature === $signature) {
+                $rangeEnd = $dateKey;
+
+                continue;
+            }
+
+            $updates[] = [
+                'startDate' => $rangeStart,
+                'endDate' => $rangeEnd,
+                $key => $dailyPayloads[$rangeStart],
+            ];
+
+            $rangeStart = $dateKey;
+            $rangeEnd = $dateKey;
+            $signature = $nextSignature;
+        }
+
+        $updates[] = [
+            'startDate' => $rangeStart,
+            'endDate' => $rangeEnd,
+            $key => $dailyPayloads[$rangeStart],
+        ];
+
+        return $updates;
+    }
+
+    /** @return array{success: bool, message: string} */
+    public function pushOtaRateMultiplier(Hotel $hotel, string $slug, float $multiplier): array
+    {
+        if (! $this->canPush()) {
+            return [
+                'success' => false,
+                'message' => 'Channel Manager is not configured.',
+            ];
+        }
+
+        $result = $this->client->channelMultiplier(
+            $this->codes->hotelCode($hotel),
+            max(0.1, $multiplier),
+            [AiosellPayloadBuilder::toAiosellChannel($slug)]
+        );
+
+        return [
+            'success' => (bool) $result['success'],
+            'message' => $result['message'] ?: ($result['success'] ? 'Rate multiplier pushed.' : 'Could not push rate multiplier.'),
+        ];
+    }
+
+    /**
+     * @return array{
+     *     attempted: bool,
+     *     success: bool,
+     *     message: string,
+     *     details: list<array{slug: string, name: string, multiplier: float, success: bool, message: string}>
+     * }
+     */
+    public function pushAllOtaRateMultipliers(Hotel $hotel): array
+    {
+        $configured = $this->otaConnections->configured($hotel);
+
+        if ($configured === []) {
+            return [
+                'attempted' => false,
+                'success' => false,
+                'message' => 'No connected OTAs to sync.',
+                'details' => [],
+            ];
+        }
+
+        if (! $this->canPush()) {
+            return [
+                'attempted' => false,
+                'success' => false,
+                'message' => 'Channel Manager is not configured.',
+                'details' => [],
+            ];
+        }
+
+        $details = [];
+        $failures = 0;
+
+        foreach ($configured as $ota) {
+            $slug = (string) ($ota['slug'] ?? '');
+            $connection = $this->otaConnections->connection($hotel, $slug);
+            $multiplier = max(0.1, (float) ($connection['rate_multiplier'] ?? 1));
+            $push = $this->pushOtaRateMultiplier($hotel, $slug, $multiplier);
+
+            if (! $push['success']) {
+                $failures++;
+            }
+
+            $details[] = [
+                'slug' => $slug,
+                'name' => (string) ($ota['name'] ?? $slug),
+                'multiplier' => $multiplier,
+                'success' => $push['success'],
+                'message' => $push['message'],
+            ];
+        }
+
+        $total = count($details);
+        $successes = $total - $failures;
+
+        return [
+            'attempted' => true,
+            'success' => $failures === 0,
+            'message' => $failures === 0
+                ? "Rate multipliers pushed to {$total} OTA".($total === 1 ? '' : 's').'.'
+                : "Pushed {$successes} of {$total} rate multipliers. {$failures} failed.",
+            'details' => $details,
+        ];
     }
 
     /** @return array{success: bool, http_code: int|null, message: string, response: mixed} */

@@ -105,11 +105,24 @@ class BulkUpdateController extends Controller
 
         $from = Carbon::parse($validated['from_date']);
         $to = Carbon::parse($validated['to_date']);
+        $channels = $validated['channels'] ?? ['all'];
 
-        $pushInventory = in_array($type, ['inventory', 'restrictions_rates', 'restrictions_inventory'], true);
+        $pushInventory = $type === 'inventory';
         $pushRates = in_array($type, ['rate', 'ratio', 'increment'], true);
 
         $syncResult = $this->cmPush->pushBulk($hotel->fresh(), $from, $to, $pushInventory, $pushRates);
+
+        if ($type === 'restrictions_inventory') {
+            $syncResult['inventory_restrictions'] = $this->cmPush->pushInventoryRestrictions($hotel->fresh(), $from, $to, $channels);
+        }
+
+        if ($type === 'restrictions_rates') {
+            $syncResult['rate_restrictions'] = $this->cmPush->pushRateRestrictions($hotel->fresh(), $from, $to, $channels);
+        }
+
+        if (in_array($type, ['restrictions_inventory', 'restrictions_rates'], true)) {
+            $syncResult['attempted'] = true;
+        }
 
         $baseMessage = "Bulk update applied to {$count} record(s) across ".count($dates).' day(s).';
         $flash = $this->cmPush->flashForSaveResult($baseMessage, $syncResult);

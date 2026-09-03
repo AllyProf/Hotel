@@ -108,6 +108,7 @@ class HotelSettingsService
             'invoice_total_text' => '',
             'tax_text' => '',
             'booking_confirmation_email' => '',
+            'auto_send_payment_links' => false,
         ];
     }
 

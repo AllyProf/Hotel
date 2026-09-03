@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Hotel\ChannelManager;
 
 use App\Http\Controllers\Controller;
+use App\Services\ChannelManager\OtaCommissionDataService;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
@@ -15,6 +16,8 @@ class OtaCommissionController extends Controller
         'checkin_date' => 'Checkin Date',
         'checkout_date' => 'Check out Date',
     ];
+
+    public function __construct(private OtaCommissionDataService $commissions) {}
 
     public function index(Request $request): View
     {
@@ -31,14 +34,18 @@ class OtaCommissionController extends Controller
             $filters['filter_type'] = 'checkin_date';
         }
 
-        $commissions = $submitted ? collect() : null;
+        $report = $submitted
+            ? $this->commissions->report($hotel, $filters)
+            : ['rows' => collect(), 'summary' => [], 'sync_message' => null];
 
         return view('hotel.channel-manager.ota-commission', [
             'hotel' => $hotel,
             'filters' => $filters,
             'filterTypes' => self::FILTER_TYPES,
             'submitted' => $submitted,
-            'commissions' => $commissions,
+            'commissions' => $report['rows'],
+            'summary' => $report['summary'],
+            'syncMessage' => $report['sync_message'],
         ]);
     }
 }

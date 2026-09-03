@@ -52,6 +52,19 @@ class OtaLogoService
     public function presentationForChannel(string $channel): array
     {
         $channel = trim($channel);
+        $normalized = $this->normalize($channel);
+
+        if (in_array($normalized, ['direct', 'pms', 'walkin', 'phone', 'frontdesk'], true)) {
+            return [
+                'name' => 'Direct',
+                'label' => $channel !== '' ? $channel : 'Direct',
+                'brand_color' => '#940000',
+                'logo_url' => null,
+                'initials' => 'DI',
+                'slug' => 'direct',
+            ];
+        }
+
         $ota = $this->resolveByChannel($channel);
         $name = $ota['name'] ?? ($channel !== '' ? $channel : 'OTA');
         $brandColor = $ota['brand_color'] ?? '#6b7280';

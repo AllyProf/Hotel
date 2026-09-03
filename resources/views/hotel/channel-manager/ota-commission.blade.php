@@ -90,6 +90,29 @@
           </form>
 
           @if($submitted)
+            @if(!empty($summary))
+              <div class="row mt-4 mb-2">
+                <div class="col-md-3 col-sm-6">
+                  <div class="small text-muted">Bookings</div>
+                  <div class="h5 mb-0">{{ $summary['bookings'] ?? 0 }}</div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                  <div class="small text-muted">With commission</div>
+                  <div class="h5 mb-0">{{ $summary['with_commission'] ?? 0 }}</div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                  <div class="small text-muted">Total commission</div>
+                  <div class="h5 mb-0">
+                    @if(($summary['total_commission'] ?? 0) > 0)
+                      {{ number_format($summary['total_commission'], 2) }} {{ $summary['currency'] ?? '' }}
+                    @else
+                      —
+                    @endif
+                  </div>
+                </div>
+              </div>
+            @endif
+
             @if($commissions && $commissions->isEmpty())
               <div class="ota-commission-empty">Data Not Found !</div>
             @elseif($commissions && $commissions->isNotEmpty())

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Services\ChannelManager\AiosellPayloadBuilder;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request as HttpRequest;
@@ -36,6 +37,8 @@ class ChannelManagerApiTester
         $baseUrl = $credentials['base_url'];
         $today = now()->format('Y-m-d');
         $tomorrow = now()->addDay()->format('Y-m-d');
+
+        $restrictions = AiosellPayloadBuilder::emptyRestrictions();
 
         $tests = [
             $this->testCase('property_details', 'Get Property / Mapping Details', 'GET',
@@ -79,12 +82,7 @@ class ChannelManagerApiTester
                         'endDate' => $today,
                         'rooms' => [[
                             'roomCode' => 'executive',
-                            'restrictions' => [
-                                'stopSell' => false,
-                                'minimumStay' => 1,
-                                'closeOnArrival' => false,
-                                'closeOnDeparture' => false,
-                            ],
+                            'restrictions' => $restrictions,
                         ]],
                     ]],
                 ], $credentials),
@@ -100,12 +98,7 @@ class ChannelManagerApiTester
                         'rates' => [[
                             'roomCode' => 'executive',
                             'rateplanCode' => 'executive-s-ep',
-                            'restrictions' => [
-                                'stopSell' => false,
-                                'minimumStay' => 1,
-                                'closeOnArrival' => false,
-                                'closeOnDeparture' => false,
-                            ],
+                            'restrictions' => $restrictions,
                         ]],
                     ]],
                 ], $credentials),
@@ -142,8 +135,17 @@ class ChannelManagerApiTester
                 [
                     'hotelCode' => $hotelCode,
                     'multiplier' => 1,
-                    'channels' => ['agoda'],
-                ], $credentials),
+                    'channels' => ['booking.com'],
+                ], $credentials, acceptHttpCodes: [200], requireSuccessBody: true, softFailOnBody: true),
+
+            $this->testCase('fetch_messages', 'Fetch Messages', 'POST',
+                "{$baseUrl}/message/{$partnerId}",
+                [
+                    'hotelCode' => $hotelCode,
+                    'startDate' => $today,
+                    'endDate' => $tomorrow,
+                    'channels' => ['booking.com'],
+                ], $credentials, acceptHttpCodes: [200, 500], softFailCodes: [500]),
 
             $this->testCase('mark_noshow', 'Mark No Show', 'POST',
                 "{$baseUrl}/marknoshow/{$partnerId}",
@@ -154,6 +156,8 @@ class ChannelManagerApiTester
                 ], $credentials, acceptHttpCodes: [200, 400, 404], softFailCodes: [500]),
 
             $this->testWebhook($hotelCode, $today, $tomorrow),
+            $this->testWebhookAction('modify', $hotelCode, $today, $tomorrow),
+            $this->testWebhookAction('cancel', $hotelCode, $today, $tomorrow),
         ];
 
         $passed = collect($tests)->where('status', 'pass')->count();
@@ -174,26 +178,23 @@ class ChannelManagerApiTester
     /** @return array<string, mixed> */
     private function testWebhook(string $hotelCode, string $checkin, string $checkout): array
     {
+        return $this->testWebhookAction('book', $hotelCode, $checkin, $checkout);
+    }
+
+    /** @return array<string, mixed> */
+    private function testWebhookAction(string $action, string $hotelCode, string $checkin, string $checkout): array
+    {
         $display = $this->integrations->channelManagerForDisplay($hotelCode);
         $url = $display['webhook_url'] ?? '';
+        $auth = $this->webhookAuthHeader();
 
-        $integrations = $this->integrations->ensureIntegrations()['channel_manager'] ?? [];
-        $webhookUser = $integrations['webhook_username'] ?? '';
-        $webhookPass = null;
-
-        if (! empty($integrations['webhook_password'])) {
-            try {
-                $webhookPass = \Illuminate\Support\Facades\Crypt::decryptString($integrations['webhook_password']);
-            } catch (\Throwable) {
-                $webhookPass = null;
-            }
-        }
-
+        $bookingId = 'TEST-'.$action.'-'.now()->format('YmdHis');
         $payload = [
-            'action' => 'book',
+            'action' => $action,
             'hotelCode' => $hotelCode,
             'channel' => 'Goibibo',
-            'bookingId' => 'TEST-'.now()->format('YmdHis'),
+            'bookingId' => $bookingId,
+            'bookedOn' => now()->format('Y-m-d H:i:s'),
             'checkin' => $checkin,
             'checkout' => $checkout,
             'segment' => 'OTA',
@@ -213,37 +214,51 @@ class ChannelManagerApiTester
             ]],
         ];
 
+        if ($action === 'cancel') {
+            $payload = [
+                'action' => 'cancel',
+                'hotelCode' => $hotelCode,
+                'channel' => 'Goibibo',
+                'bookingId' => $bookingId,
+            ];
+        }
+
         try {
+            $server = [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_ACCEPT' => 'application/json',
+            ];
+
+            if ($auth !== null) {
+                $server['HTTP_AUTHORIZATION'] = $auth;
+            }
+
             $request = HttpRequest::create(
                 route('webhooks.cm.reservations', [], false),
                 'POST',
-                server: ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'],
+                server: $server,
                 content: json_encode($payload)
             );
-
-            if ($webhookUser !== '' && $webhookPass !== null) {
-                $request->headers->set('Authorization', 'Basic '.base64_encode($webhookUser.':'.$webhookPass));
-            }
 
             $response = app()->handle($request);
             $httpCode = $response->getStatusCode();
             $body = json_decode($response->getContent(), true) ?? $response->getContent();
-            $ok = $httpCode >= 200 && $httpCode < 300;
+            $ok = $httpCode >= 200 && $httpCode < 300 && AiosellPayloadBuilder::isSuccessfulResponse($body, true);
 
             return [
-                'key' => 'reservation_webhook',
-                'name' => 'Reservation Webhook (inbound)',
+                'key' => 'reservation_webhook_'.$action,
+                'name' => 'Reservation Webhook ('.$action.')',
                 'method' => 'POST',
                 'url' => $url,
                 'status' => $ok ? 'pass' : 'fail',
                 'http_code' => $httpCode,
-                'message' => $this->messageFromResponse($body, $ok),
+                'message' => AiosellPayloadBuilder::responseMessage($body, $ok),
                 'response' => $this->preview($body),
             ];
         } catch (\Throwable $e) {
             return [
-                'key' => 'reservation_webhook',
-                'name' => 'Reservation Webhook (inbound)',
+                'key' => 'reservation_webhook_'.$action,
+                'name' => 'Reservation Webhook ('.$action.')',
                 'method' => 'POST',
                 'url' => $url,
                 'status' => 'fail',
@@ -252,6 +267,27 @@ class ChannelManagerApiTester
                 'response' => null,
             ];
         }
+    }
+
+    private function webhookAuthHeader(): ?string
+    {
+        $integrations = $this->integrations->ensureIntegrations()['channel_manager'] ?? [];
+        $webhookUser = trim((string) ($integrations['webhook_username'] ?? ''));
+        $webhookPass = null;
+
+        if (! empty($integrations['webhook_password'])) {
+            try {
+                $webhookPass = \Illuminate\Support\Facades\Crypt::decryptString($integrations['webhook_password']);
+            } catch (\Throwable) {
+                $webhookPass = null;
+            }
+        }
+
+        if ($webhookUser === '' || $webhookPass === null) {
+            return null;
+        }
+
+        return 'Basic '.base64_encode($webhookUser.':'.$webhookPass);
     }
 
     /** @param  array<string, mixed>|null  $payload */
@@ -264,6 +300,8 @@ class ChannelManagerApiTester
         array $credentials,
         array $acceptHttpCodes = [200],
         array $softFailCodes = [],
+        bool $requireSuccessBody = false,
+        bool $softFailOnBody = false,
     ): array {
         $lastError = null;
 
@@ -280,8 +318,10 @@ class ChannelManagerApiTester
 
                 $httpCode = $response->status();
                 $body = $response->json() ?? $response->body();
-                $ok = in_array($httpCode, $acceptHttpCodes, true) || $response->successful();
-                $soft = in_array($httpCode, $softFailCodes, true);
+                $httpOk = in_array($httpCode, $acceptHttpCodes, true) || $response->successful();
+                $bodyOk = AiosellPayloadBuilder::isSuccessfulResponse($body, $httpOk);
+                $ok = $httpOk && (! $requireSuccessBody || $bodyOk);
+                $soft = in_array($httpCode, $softFailCodes, true) || ($softFailOnBody && $httpOk && ! $bodyOk);
 
                 return [
                     'key' => $key,
@@ -291,8 +331,8 @@ class ChannelManagerApiTester
                     'status' => $ok ? 'pass' : ($soft ? 'skip' : 'fail'),
                     'http_code' => $httpCode,
                     'message' => $soft
-                        ? $this->messageFromResponse($body, false).' (expected without a real booking ID)'
-                        : $this->messageFromResponse($body, $ok),
+                        ? AiosellPayloadBuilder::responseMessage($body, false).' (expected without a real booking ID)'
+                        : AiosellPayloadBuilder::responseMessage($body, $ok),
                     'response' => $this->preview($body),
                 ];
             } catch (\Throwable $e) {
@@ -358,16 +398,7 @@ class ChannelManagerApiTester
 
     private function messageFromResponse(mixed $body, bool $ok): string
     {
-        if (is_array($body)) {
-            if (isset($body['message'])) {
-                return (string) $body['message'];
-            }
-            if (isset($body['success'])) {
-                return $body['success'] ? 'Success' : 'Request failed';
-            }
-        }
-
-        return $ok ? 'OK' : 'Request failed';
+        return AiosellPayloadBuilder::responseMessage($body, $ok);
     }
 
     private function preview(mixed $body): ?string

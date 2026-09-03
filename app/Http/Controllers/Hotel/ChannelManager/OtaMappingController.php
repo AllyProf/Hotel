@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Hotel\ChannelManager;
 use App\Http\Controllers\Controller;
 use App\Services\ChannelManager\ChannelManagerCodeResolver;
 use App\Services\ChannelManager\ChannelManagerPropertyService;
+use App\Services\ChannelManager\ChannelManagerPushService;
 use App\Services\HotelIntegrationService;
 use App\Services\OtaConnectionService;
 use App\Services\OtaLogoService;
@@ -21,6 +22,7 @@ class OtaMappingController extends Controller
         private ChannelManagerCodeResolver $codes,
         private ChannelManagerPropertyService $propertyService,
         private OtaConnectionService $otaConnections,
+        private ChannelManagerPushService $cmPush,
     ) {}
 
     public function index(): View
@@ -103,17 +105,99 @@ class OtaMappingController extends Controller
             ], 422);
         }
 
+        $enabled = $request->boolean('enabled');
+        $multiplier = (float) ($validated['rate_multiplier'] ?? 1);
+
         $this->otaConnections->saveConnection($hotel, $slug, [
-            'enabled' => $request->boolean('enabled'),
+            'enabled' => $enabled,
             'hotel_code' => $validated['hotel_code'] ?? '',
             'currency' => $validated['currency'] ?? 'USD',
-            'rate_multiplier' => $validated['rate_multiplier'] ?? 1,
+            'rate_multiplier' => $multiplier,
         ]);
+
+        $message = 'Mapping saved. This channel will appear on Update Rates and Update Rooms.';
+        $multiplierPushed = false;
+
+        if ($enabled) {
+            $push = $this->cmPush->pushOtaRateMultiplier($hotel, $slug, $multiplier);
+
+            if ($push['success']) {
+                $multiplierPushed = true;
+                $message .= ' Rate multiplier pushed to Channel Manager.';
+            } elseif ($this->cmPush->canPush()) {
+                $message .= ' Could not push rate multiplier: '.$push['message'];
+            }
+        }
 
         return response()->json([
             'success' => true,
-            'message' => 'Mapping saved. This channel will appear on Update Rates and Update Rooms.',
+            'message' => $message,
             'configured' => $this->otaConnections->isConfigured($hotel->fresh(), $slug),
+            'multiplier_pushed' => $multiplierPushed,
+        ]);
+    }
+
+    public function syncMultipliers(): JsonResponse
+    {
+        $hotel = auth()->user()->hotel()->firstOrFail();
+        $result = $this->cmPush->pushAllOtaRateMultipliers($hotel);
+
+        if (! $result['attempted']) {
+            return response()->json([
+                'success' => false,
+                'message' => $result['message'],
+                'details' => $result['details'],
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => $result['success'],
+            'message' => $result['message'],
+            'details' => $result['details'],
+        ], $result['success'] ? 200 : 422);
+    }
+
+    public function fetchProperty(Request $request): JsonResponse
+    {
+        auth()->user()->hotel()->firstOrFail();
+
+        $validated = $request->validate([
+            'hotel_code' => ['required', 'string', 'max:120'],
+        ]);
+
+        $hotelCode = trim($validated['hotel_code']);
+        $client = app(\App\Services\ChannelManager\ChannelManagerClient::class);
+
+        if (! $client->isConfigured()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Channel Manager is not configured. Ask your platform admin to enable CM credentials.',
+            ], 422);
+        }
+
+        $result = $client->getPropertyDetails($hotelCode);
+
+        if (! $result['success'] || ! is_array($result['response'])) {
+            return response()->json([
+                'success' => false,
+                'message' => $result['message'] ?: 'Could not fetch property details from Channel Manager.',
+            ], 422);
+        }
+
+        $property = $result['response'];
+        $rooms = is_array($property['rooms'] ?? null) ? $property['rooms'] : [];
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Property details loaded from Channel Manager.',
+            'property' => [
+                'hotel_id' => (string) ($property['hotel_id'] ?? $hotelCode),
+                'hotel_name' => (string) ($property['hotel_name'] ?? ''),
+                'currency' => (string) ($property['currency'] ?? ''),
+                'city' => (string) ($property['address']['city'] ?? ''),
+                'room_count' => count($rooms),
+                'rateplan_count' => collect($rooms)->sum(fn ($room) => is_array($room) ? count($room['rateplans'] ?? []) : 0),
+            ],
         ]);
     }
 }

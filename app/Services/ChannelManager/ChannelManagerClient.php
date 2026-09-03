@@ -50,8 +50,93 @@ class ChannelManagerClient
     /** @return array{success: bool, http_code: int|null, message: string, response: mixed} */
     public function fetchReservations(string $hotelCode, string $startDate, string $endDate): array
     {
+        return $this->fetchData('reservation', $hotelCode, $startDate, $endDate);
+    }
+
+    /** @return array{success: bool, http_code: int|null, message: string, response: mixed} */
+    public function fetchInventory(string $hotelCode, string $startDate, string $endDate): array
+    {
+        return $this->fetchData('inventory', $hotelCode, $startDate, $endDate);
+    }
+
+    /** @return array{success: bool, http_code: int|null, message: string, response: mixed} */
+    public function fetchRates(string $hotelCode, string $startDate, string $endDate): array
+    {
+        return $this->fetchData('rates', $hotelCode, $startDate, $endDate);
+    }
+
+    /** @return array{success: bool, http_code: int|null, message: string, response: mixed} */
+    public function pushInventoryRestrictions(array $payload): array
+    {
+        return $this->post('/update/{partnerId}', $payload);
+    }
+
+    /** @return array{success: bool, http_code: int|null, message: string, response: mixed} */
+    public function pushRateRestrictions(array $payload): array
+    {
+        return $this->post('/update-rates/{partnerId}', $payload);
+    }
+
+    /** @return array{success: bool, http_code: int|null, message: string, response: mixed} */
+    public function markNoShow(string $hotelCode, string $bookingId, string $channel): array
+    {
+        return $this->post('/marknoshow/{partnerId}', [
+            'hotelCode' => $hotelCode,
+            'bookingId' => $bookingId,
+            'channel' => $channel,
+        ]);
+    }
+
+    /** @return array{success: bool, http_code: int|null, message: string, response: mixed} */
+    public function channelMultiplier(string $hotelCode, float $multiplier, array $channels): array
+    {
+        return $this->post('/channel_multiplier/{partnerId}', [
+            'hotelCode' => $hotelCode,
+            'multiplier' => $multiplier,
+            'channels' => array_values($channels),
+        ]);
+    }
+
+    /** @param  list<string>  $channels @return array{success: bool, http_code: int|null, message: string, response: mixed} */
+    public function fetchMessages(string $hotelCode, string $startDate, string $endDate, array $channels = []): array
+    {
+        $payload = [
+            'hotelCode' => $hotelCode,
+            'startDate' => $startDate,
+            'endDate' => $endDate,
+        ];
+
+        if ($channels !== []) {
+            $payload['channels'] = array_values($channels);
+            $payload['toChannels'] = array_values($channels);
+        }
+
+        return $this->post('/message/{partnerId}', $payload);
+    }
+
+    /** @param  list<string>  $channels @return array{success: bool, http_code: int|null, message: string, response: mixed} */
+    public function fetchReviews(string $hotelCode, string $startDate, string $endDate, array $channels = []): array
+    {
+        $payload = [
+            'hotelCode' => $hotelCode,
+            'startDate' => $startDate,
+            'endDate' => $endDate,
+            'type' => 'review',
+        ];
+
+        if ($channels !== []) {
+            $payload['channels'] = array_values($channels);
+            $payload['toChannels'] = array_values($channels);
+        }
+
+        return $this->post('/message/{partnerId}', $payload);
+    }
+
+    /** @return array{success: bool, http_code: int|null, message: string, response: mixed} */
+    private function fetchData(string $type, string $hotelCode, string $startDate, string $endDate): array
+    {
         return $this->post('/data/{partnerId}', [
-            'type' => 'reservation',
+            'type' => $type,
             'hotelCode' => $hotelCode,
             'startDate' => $startDate,
             'endDate' => $endDate,
@@ -95,12 +180,12 @@ class ChannelManagerClient
                 : $request->asJson()->post($url, $payload ?? []);
 
             $body = $response->json() ?? $response->body();
-            $ok = $response->successful();
+            $ok = AiosellPayloadBuilder::isSuccessfulResponse($body, $response->successful());
 
             return [
                 'success' => $ok,
                 'http_code' => $response->status(),
-                'message' => $this->messageFromResponse($body, $ok),
+                'message' => AiosellPayloadBuilder::responseMessage($body, $ok),
                 'response' => $body,
             ];
         } catch (\Throwable $e) {
@@ -143,15 +228,6 @@ class ChannelManagerClient
 
     private function messageFromResponse(mixed $body, bool $ok): string
     {
-        if (is_array($body)) {
-            if (isset($body['message'])) {
-                return (string) $body['message'];
-            }
-            if (isset($body['success'])) {
-                return $body['success'] ? 'Success' : 'Request failed';
-            }
-        }
-
-        return $ok ? 'OK' : 'Request failed';
+        return AiosellPayloadBuilder::responseMessage($body, $ok);
     }
 }

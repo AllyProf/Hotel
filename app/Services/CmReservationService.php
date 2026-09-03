@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\CmReservation;
 use App\Models\Hotel;
 use App\Models\HotelSetting;
+use App\Services\ChannelManager\ReservationInventoryService;
 use Illuminate\Support\Str;
 
 class CmReservationService
@@ -12,10 +13,11 @@ class CmReservationService
     public function __construct(
         private HotelIntegrationService $hotelIntegrations,
         private PlatformIntegrationService $platformIntegrations,
+        private ReservationInventoryService $inventorySync,
     ) {}
 
     /** @param array<string, mixed> $payload */
-    public function storeFromWebhook(array $payload): CmReservation
+    public function storeFromWebhook(array $payload, bool $adjustInventory = true): CmReservation
     {
         $hotelCode = (string) ($payload['hotelCode'] ?? '');
         $bookingId = (string) ($payload['bookingId'] ?? '');
@@ -23,13 +25,18 @@ class CmReservationService
         $amount = is_array($payload['amount'] ?? null) ? $payload['amount'] : [];
         $guest = is_array($payload['guest'] ?? null) ? $payload['guest'] : [];
 
+        $existing = CmReservation::query()
+            ->where('hotel_code', $hotelCode)
+            ->where('booking_id', $bookingId)
+            ->first();
+
         $status = match ($action) {
             'cancel' => CmReservation::STATUS_CANCELLED,
             'modify' => CmReservation::STATUS_MODIFIED,
             default => CmReservation::STATUS_CONFIRMED,
         };
 
-        return CmReservation::query()->updateOrCreate(
+        $reservation = CmReservation::query()->updateOrCreate(
             [
                 'hotel_code' => $hotelCode,
                 'booking_id' => $bookingId,
@@ -51,6 +58,14 @@ class CmReservationService
                 'payload' => $payload,
             ]
         );
+
+        $hotel = $reservation->hotel_id ? Hotel::query()->find($reservation->hotel_id) : null;
+
+        if ($hotel !== null) {
+            $this->inventorySync->syncAfterWebhook($hotel, $action, $existing, $reservation->fresh(), $adjustInventory);
+        }
+
+        return $reservation;
     }
 
     /**
@@ -96,7 +111,7 @@ class CmReservationService
                 $payload['hotelCode'] = $hotelCode;
             }
 
-            $this->storeFromWebhook($payload);
+            $this->storeFromWebhook($payload, adjustInventory: false);
             $imported++;
         }
 
@@ -214,6 +229,9 @@ class CmReservationService
                 'amountBeforeTax' => $amount['amountBeforeTax'] ?? $amount['amount_before_tax'] ?? $item['amount_before_tax'] ?? null,
                 'tax' => $amount['tax'] ?? $item['tax'] ?? null,
                 'currency' => $amount['currency'] ?? $item['currency'] ?? null,
+                'commission' => $amount['commission'] ?? $amount['otaCommission'] ?? $item['commission'] ?? null,
+                'tcs' => $amount['tcs'] ?? null,
+                'tds' => $amount['tds'] ?? null,
             ],
             'rooms' => $item['rooms'] ?? null,
         ];

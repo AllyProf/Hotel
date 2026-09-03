@@ -255,7 +255,7 @@
     <button type="button" class="btn btn-secondary btn-sm js-swal-info" data-title="Email Notifications" data-text="Configure OTA mapping email alerts from your account settings.">
       Email Notifications
     </button>
-    <button type="button" class="btn btn-primary btn-sm js-swal-info" data-title="Sync to OTAs" data-text="Push your latest room and rate mappings to all connected OTAs.">
+    <button type="button" class="btn btn-primary btn-sm" id="otaSyncMultipliers">
       Sync to OTAs
     </button>
   </div>
@@ -352,6 +352,43 @@
         });
       });
 
+      var syncBtn = document.getElementById('otaSyncMultipliers');
+      if (syncBtn) {
+        syncBtn.addEventListener('click', function () {
+          syncBtn.disabled = true;
+          var originalHtml = syncBtn.innerHTML;
+          syncBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Syncing…';
+
+          fetch('{{ route('hotel.channel-manager.ota-mapping.sync-multipliers') }}', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'X-CSRF-TOKEN': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({})
+          })
+            .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+            .then(function (result) {
+              syncBtn.disabled = false;
+              syncBtn.innerHTML = originalHtml;
+
+              if (typeof swal === 'function') {
+                swal(
+                  result.ok ? 'Sync Complete' : 'Sync Failed',
+                  result.data.message || (result.ok ? 'Rate multipliers pushed.' : 'Could not sync rate multipliers.'),
+                  result.ok ? 'success' : 'warning'
+                );
+              }
+            })
+            .catch(function () {
+              syncBtn.disabled = false;
+              syncBtn.innerHTML = originalHtml;
+              if (typeof swal === 'function') swal('Sync Failed', 'Could not reach Channel Manager.', 'error');
+            });
+        });
+      }
+
       document.querySelectorAll('.js-ota-fetch').forEach(function (btn) {
         btn.addEventListener('click', function () {
           var card = btn.closest('.js-ota-card');
@@ -361,7 +398,45 @@
             return;
           }
           var area = card.querySelector('.js-ota-fetch-area');
-          area.innerHTML = '<i class="fa fa-check-circle text-success"></i><div class="mt-2">Hotel info fetched. Submit mapping to connect.</div>';
+          area.innerHTML = '<i class="fa fa-spinner fa-spin"></i><div class="mt-2">Fetching from Channel Manager…</div>';
+          btn.disabled = true;
+
+          fetch('{{ route('hotel.channel-manager.ota-mapping.fetch-property') }}', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'X-CSRF-TOKEN': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({ hotel_code: code })
+          })
+            .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+            .then(function (result) {
+              btn.disabled = false;
+              if (!result.ok || !result.data.success) {
+                area.innerHTML = '<i class="fa fa-times-circle text-danger"></i><div class="mt-2">' + (result.data.message || 'Fetch failed.') + '</div>';
+                return;
+              }
+              var p = result.data.property || {};
+              area.innerHTML =
+                '<i class="fa fa-check-circle text-success"></i>' +
+                '<div class="mt-2"><strong>' + (p.hotel_name || p.hotel_id || code) + '</strong></div>' +
+                '<div class="small text-muted">' +
+                  (p.city ? p.city + ' · ' : '') +
+                  (p.room_count || 0) + ' room types · ' +
+                  (p.rateplan_count || 0) + ' rate plans' +
+                  (p.currency ? ' · ' + p.currency : '') +
+                '</div>';
+              if (p.currency && card.querySelector('.js-ota-currency')) {
+                var currencySelect = card.querySelector('.js-ota-currency');
+                var hasOption = Array.prototype.some.call(currencySelect.options, function (opt) { return opt.value === p.currency; });
+                if (hasOption) currencySelect.value = p.currency;
+              }
+            })
+            .catch(function () {
+              btn.disabled = false;
+              area.innerHTML = '<i class="fa fa-times-circle text-danger"></i><div class="mt-2">Could not reach Channel Manager.</div>';
+            });
         });
       });
 

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\OtaLogoService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -114,6 +115,14 @@ class CmReservation extends Model
         $plans = [];
 
         foreach ($this->roomLines() as $line) {
+            $mealPlan = trim((string) ($line['mealPlan'] ?? $line['meal_plan'] ?? ''));
+
+            if ($mealPlan !== '') {
+                $plans[] = strtoupper($mealPlan);
+
+                continue;
+            }
+
             $code = strtolower((string) ($line['rateplanCode'] ?? $line['rateplan_code'] ?? $line['ratePlanCode'] ?? ''));
 
             if ($code === '') {
@@ -130,10 +139,59 @@ class CmReservation extends Model
         if ($plans === []) {
             $payloadPlan = $this->payload['mealPlan'] ?? $this->payload['meal_plan'] ?? null;
 
-            return $payloadPlan ? strtoupper((string) $payloadPlan) : '—';
+            if ($payloadPlan) {
+                return strtoupper((string) $payloadPlan);
+            }
+
+            $resolved = $this->resolveMealPlanFromRatePlans();
+
+            return $resolved !== '' ? $resolved : '—';
         }
 
         return implode(', ', $plans);
+    }
+
+    private function resolveMealPlanFromRatePlans(): string
+    {
+        if (! $this->hotel_id) {
+            return '';
+        }
+
+        static $cache = [];
+        $plans = [];
+
+        foreach ($this->roomLines() as $line) {
+            $planCode = trim((string) ($line['rateplanCode'] ?? $line['rateplan_code'] ?? $line['ratePlanCode'] ?? ''));
+
+            if ($planCode === '') {
+                continue;
+            }
+
+            $roomCode = trim((string) ($line['roomCode'] ?? $line['room_code'] ?? ''));
+            $cacheKey = $this->hotel_id.':'.$roomCode.':'.$planCode;
+
+            if (! array_key_exists($cacheKey, $cache)) {
+                $query = HotelRatePlan::query()
+                    ->where('hotel_id', $this->hotel_id)
+                    ->where('code', $planCode);
+
+                if ($roomCode !== '') {
+                    $query->whereHas('room', function ($roomQuery) use ($roomCode) {
+                        $roomQuery->where('name', $roomCode)->orWhere('display_name', $roomCode);
+                    });
+                }
+
+                $cache[$cacheKey] = strtoupper((string) ($query->value('meal_plan') ?? ''));
+            }
+
+            if ($cache[$cacheKey] !== '') {
+                $plans[] = $cache[$cacheKey];
+            }
+        }
+
+        $plans = array_values(array_unique($plans));
+
+        return $plans !== [] ? implode(', ', $plans) : '';
     }
 
     public function roomNightCount(): ?int
@@ -145,6 +203,118 @@ class CmReservation extends Model
         $nights = $this->checkin->diffInDays($this->checkout);
 
         return $nights > 0 ? $nights : null;
+    }
+
+    public function guestCount(): int
+    {
+        $lines = $this->roomLines();
+
+        if ($lines === []) {
+            return 1;
+        }
+
+        $total = 0;
+
+        foreach ($lines as $line) {
+            $occupancy = is_array($line['occupancy'] ?? null) ? $line['occupancy'] : [];
+            $total += (int) ($occupancy['adults'] ?? 1);
+            $total += (int) ($occupancy['children'] ?? 0);
+        }
+
+        return max(1, $total);
+    }
+
+    public function categoryLabel(): string
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+
+        foreach (['category', 'bookingCategory', 'booking_category', 'segment'] as $key) {
+            $value = trim((string) ($payload[$key] ?? ''));
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return '—';
+    }
+
+    public function paymentLinkUrl(): ?string
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+
+        foreach (['paymentLink', 'payment_link', 'paymentUrl', 'payment_url'] as $key) {
+            $value = trim((string) ($payload[$key] ?? ''));
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    public function paymentLinkLabel(): string
+    {
+        return $this->paymentLinkUrl() ? 'Link' : '—';
+    }
+
+    public function sourceLabel(): string
+    {
+        return $this->sourceDisplayLabel();
+    }
+
+    public function sourceDisplayLabel(): string
+    {
+        return self::sourceMeta($this->channel)['label'];
+    }
+
+    public function sourceBadgeClass(): string
+    {
+        return self::sourceMeta($this->channel)['class'];
+    }
+
+    /** @return array{label: string, class: string} */
+    private static function sourceMeta(?string $channel): array
+    {
+        static $cache = [];
+
+        $channel = trim((string) $channel);
+
+        if ($channel === '') {
+            return ['label' => '—', 'class' => 'rd-source-neutral'];
+        }
+
+        if (! array_key_exists($channel, $cache)) {
+            $presentation = app(OtaLogoService::class)->presentationForChannel($channel);
+
+            $cache[$channel] = [
+                'label' => (string) ($presentation['name'] ?? $channel),
+                'class' => self::sourceClassForSlug($presentation['slug'] ?? null),
+            ];
+        }
+
+        return $cache[$channel];
+    }
+
+    private static function sourceClassForSlug(?string $slug): string
+    {
+        return match ($slug) {
+            'direct' => 'rd-source-direct',
+            'booking-com' => 'rd-source-booking',
+            'expedia' => 'rd-source-expedia',
+            'agoda' => 'rd-source-agoda',
+            'airbnb' => 'rd-source-airbnb',
+            'goibibo' => 'rd-source-goibibo',
+            'makemytrip' => 'rd-source-mmt',
+            'trip-com' => 'rd-source-trip',
+            'cleartrip' => 'rd-source-cleartrip',
+            'hostelworld' => 'rd-source-hostelworld',
+            'hotelbeds' => 'rd-source-hotelbeds',
+            'traveloka' => 'rd-source-traveloka',
+            'yatra' => 'rd-source-yatra',
+            default => 'rd-source-ota',
+        };
     }
 
     public function paymentLabel(): string
@@ -181,6 +351,20 @@ class CmReservation extends Model
         return number_format((float) $this->amount_after_tax, 0).' '.($this->currency ?? '');
     }
 
+    public function commissionAmount(): ?float
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+        $amount = is_array($payload['amount'] ?? null) ? $payload['amount'] : [];
+
+        foreach (['commission', 'otaCommission', 'ota_commission'] as $key) {
+            if (isset($amount[$key]) && is_numeric($amount[$key])) {
+                return (float) $amount[$key];
+            }
+        }
+
+        return null;
+    }
+
     public function bookedOnLabel(): string
     {
         return $this->created_at?->format('d/m/Y H:i') ?? '—';
@@ -206,18 +390,18 @@ class CmReservation extends Model
         $label = strtolower($this->paymentLabel());
 
         if ($label === '—') {
-            return 'lb-pay-neutral';
+            return 'rd-pay-neutral';
         }
 
         if (str_contains($label, 'prepaid') || str_contains($label, 'paid')) {
-            return 'lb-pay-prepaid';
+            return 'rd-pay-prepaid';
         }
 
         if (str_contains($label, 'hotel')) {
-            return 'lb-pay-pah';
+            return 'rd-pay-pah';
         }
 
-        return 'lb-pay-neutral';
+        return 'rd-pay-neutral';
     }
 
     public function statusBadgeClass(): string

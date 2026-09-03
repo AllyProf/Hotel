@@ -241,4 +241,70 @@ class RoomInventoryService
 
         return $names;
     }
+
+    /** @return array{available: int, requested: int, ok: bool, message: string, room_name: string} */
+    public function checkStayAvailability(Hotel $hotel, int $roomId, Carbon $checkin, Carbon $checkout, int $requested): array
+    {
+        $room = $hotel->rooms()->where('is_enabled', true)->find($roomId);
+        $roomName = $room ? ($room->display_name ?: $room->name) : 'Room';
+
+        if ($room === null) {
+            return [
+                'available' => 0,
+                'requested' => max(1, $requested),
+                'ok' => false,
+                'message' => 'Room type not found.',
+                'room_name' => $roomName,
+            ];
+        }
+
+        if ($checkout->lte($checkin)) {
+            return [
+                'available' => 0,
+                'requested' => max(1, $requested),
+                'ok' => false,
+                'message' => 'Check-out must be after check-in.',
+                'room_name' => $roomName,
+            ];
+        }
+
+        $requested = max(1, $requested);
+        $minAvailable = $this->minAvailableForStay($room, $checkin, $checkout);
+
+        if ($requested <= $minAvailable) {
+            return [
+                'available' => $minAvailable,
+                'requested' => $requested,
+                'ok' => true,
+                'message' => $minAvailable.' room'.($minAvailable === 1 ? '' : 's').' available for '.$roomName.'.',
+                'room_name' => $roomName,
+            ];
+        }
+
+        return [
+            'available' => $minAvailable,
+            'requested' => $requested,
+            'ok' => false,
+            'message' => 'Only '.$minAvailable.' room'.($minAvailable === 1 ? '' : 's').' available for '.$roomName.'. You requested '.$requested.'.',
+            'room_name' => $roomName,
+        ];
+    }
+
+    public function minAvailableForStay(\App\Models\HotelRoom $room, Carbon $checkin, Carbon $checkout): int
+    {
+        $minAvailable = PHP_INT_MAX;
+
+        foreach (CarbonPeriod::create($checkin->copy()->startOfDay(), '1 day', $checkout->copy()->subDay()) as $day) {
+            $dateKey = Carbon::parse($day)->format('Y-m-d');
+            $row = HotelRoomInventory::query()
+                ->where('hotel_room_id', $room->id)
+                ->where('date', $dateKey)
+                ->first();
+
+            $available = $row ? (int) $row->available_count : (int) $room->room_count;
+            $minAvailable = min($minAvailable, $available);
+        }
+
+        return $minAvailable === PHP_INT_MAX ? 0 : max(0, $minAvailable);
+    }
 }

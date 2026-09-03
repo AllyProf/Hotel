@@ -5,8 +5,8 @@ return [
     |--------------------------------------------------------------------------
     | Channel Manager integration (provider-agnostic)
     |--------------------------------------------------------------------------
-    | Credentials are stored per hotel in hotel_settings.integrations.
-    | Defaults below come from env — never hardcode usernames/passwords in code.
+    | Credentials are stored at platform level in platform_settings.integrations.
+    | Per-hotel settings only store hotel_code and sandbox mappings.
     */
     'provider_name' => env('CHANNEL_MANAGER_PROVIDER_NAME', 'Channel Manager'),
 
@@ -74,5 +74,14 @@ return [
         ['method' => 'POST', 'name' => 'Fetch Reservations', 'path' => '/data/{partnerId}', 'group' => 'fetch'],
         ['method' => 'POST', 'name' => 'Reservation: Book / Modify / Cancel', 'path' => '{webhookUrl}', 'group' => 'webhook', 'inbound' => true],
         ['method' => 'POST', 'name' => 'Channel Multiplier', 'path' => '/channel_multiplier/{partnerId}', 'group' => 'pricing'],
+        ['method' => 'POST', 'name' => 'Fetch Messages', 'path' => '/message/{partnerId}', 'group' => 'advanced'],
+        ['method' => 'POST', 'name' => 'Fetch Reviews', 'path' => '/message/{partnerId}', 'group' => 'advanced', 'note' => 'Same endpoint with type=review in body'],
+    ],
+
+    'sync_channels' => [
+        ['label' => 'Booking.com', 'value' => 'booking.com'],
+        ['label' => 'Whatsapp', 'value' => 'whatsapp'],
+        ['label' => 'AirBnb', 'value' => 'airbnb'],
+        ['label' => 'Expedia', 'value' => 'expedia'],
     ],
 ];

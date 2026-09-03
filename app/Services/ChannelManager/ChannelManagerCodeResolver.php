@@ -72,6 +72,51 @@ class ChannelManagerCodeResolver
         return "{$roomSlug}-{$occupancy}-{$meal}";
     }
 
+    public function resolveRoomByCode(Hotel $hotel, string $roomCode): ?HotelRoom
+    {
+        $roomCode = trim($roomCode);
+
+        if ($roomCode === '') {
+            return null;
+        }
+
+        $hotel->loadMissing(['rooms' => fn ($query) => $query->where('is_enabled', true)]);
+
+        $settings = $hotel->settings;
+        $mappings = is_array($settings?->integrations['channel_manager']['room_mappings'] ?? null)
+            ? $settings->integrations['channel_manager']['room_mappings']
+            : [];
+
+        foreach ($mappings as $roomId => $mappedCode) {
+            if (strcasecmp((string) $mappedCode, $roomCode) === 0) {
+                $room = $hotel->rooms->firstWhere('id', (int) $roomId);
+
+                if ($room !== null) {
+                    return $room;
+                }
+            }
+        }
+
+        $needle = strtolower($roomCode);
+
+        foreach ($hotel->rooms as $room) {
+            $candidates = [
+                strtolower($this->roomCode($hotel, $room)),
+                Str::slug($room->name ?: ''),
+                strtolower($room->name ?? ''),
+                strtolower($room->display_name ?? ''),
+            ];
+
+            foreach ($candidates as $candidate) {
+                if ($candidate !== '' && ($candidate === $needle || str_contains($candidate, $needle) || str_contains($needle, $candidate))) {
+                    return $room;
+                }
+            }
+        }
+
+        return null;
+    }
+
     public function occupancyLetter(string $occupancy): string
     {
         if (preg_match('/\(([sdtq])\)/i', $occupancy, $matches)) {

@@ -20,8 +20,8 @@ return [
     'revenue_management_software' => [
         'label' => 'Revenue Management',
         'icon' => 'fa fa-line-chart',
-        'route' => null,
-        'route_is' => null,
+        'route' => 'hotel.analytics.hotel-performance',
+        'route_is' => 'hotel.analytics.*',
         'description' => 'Optimize pricing and forecast demand to maximize revenue.',
         'getting_started' => 5,
     ],
@@ -68,8 +68,8 @@ return [
     'accounting_expenses_system' => [
         'label' => 'Accounting & Expenses',
         'icon' => 'fa fa-calculator',
-        'route' => null,
-        'route_is' => null,
+        'route' => 'hotel.expenses.index',
+        'route_is' => 'hotel.expenses.*',
         'description' => 'Record expenses, invoices, and financial reports.',
         'getting_started' => 9,
     ],
