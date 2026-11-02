@@ -4,7 +4,13 @@ namespace App\Services;
 
 use App\Models\CmReservation;
 use App\Models\Hotel;
+use App\Models\HotelBarSale;
+use App\Models\HotelConferenceBooking;
+use App\Models\HotelLaundryOrder;
 use App\Models\HotelRoom;
+use App\Models\HotelRoomUnit;
+use App\Models\HotelSwimmingVisit;
+use App\Services\Bar\BarPurchaseListService;
 use App\Services\ChannelManager\ChannelManagerCodeResolver;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
@@ -16,6 +22,7 @@ class HotelAnalyticsService
 {
     public function __construct(
         private ChannelManagerCodeResolver $codes,
+        private FrankfurterExchangeRateService $exchangeRates,
     ) {}
 
     /** @return array<string, mixed> */
@@ -370,8 +377,9 @@ class HotelAnalyticsService
         $hotelCode = $this->codes->hotelCode($hotel);
         $date = Carbon::parse($filters['report_date'])->startOfDay();
         $periodStart = $date->copy()->startOfMonth();
+        $periodDays = max(1, $periodStart->diffInDays($date) + 1);
         $totalRooms = $this->totalSellableRooms($hotel);
-        $currency = strtoupper($hotel->currency ?: 'USD');
+        $currency = $this->reportCurrencyForHotel($hotel);
 
         $dayLabel = $date->format('d-M');
         $periodLabel = $periodStart->format('d-M').' to '.$date->format('d-M');
@@ -382,79 +390,627 @@ class HotelAnalyticsService
                     ->orWhere('hotel_code', $hotelCode);
             })
             ->where('status', '!=', CmReservation::STATUS_CANCELLED)
+            ->whereDate('checkin', '<=', $date)
+            ->whereDate('checkout', '>', $periodStart)
             ->get();
 
         $dayPerformance = $this->emptyPerformanceBucket();
         $periodPerformance = $this->emptyPerformanceBucket();
+        /** @var array<string, float> $dayRevenueByCurrency */
+        $dayRevenueByCurrency = [];
+        /** @var array<string, float> $periodRevenueByCurrency */
+        $periodRevenueByCurrency = [];
         $daySources = [];
         $periodSources = [];
-        $dayPickup = $this->emptyPerformanceBucket();
-        $periodPickup = $this->emptyPerformanceBucket();
-        $pickupSources = [];
 
         foreach ($reservations as $reservation) {
-            $roomNights = max(1, (int) ($reservation->roomNightCount() ?? 1)) * max(1, $reservation->roomCount());
-            $revenue = (float) ($reservation->amount_after_tax ?? 0);
             $channel = $reservation->sourceDisplayLabel() ?: 'Direct';
-            $checkout = $reservation->checkout ? Carbon::parse($reservation->checkout)->startOfDay() : null;
-            $bookedOn = $reservation->created_at ? Carbon::parse($reservation->created_at)->startOfDay() : null;
-            $occupiedNight = $this->occupiedRoomsOnNight($reservation, $date);
+            $resCurrency = $this->reservationReportCurrency($reservation, $currency);
+            $roomsOccupied = $this->occupiedRoomsOnNight($reservation, $date);
 
-            if ($checkout && $checkout->equalTo($date)) {
-                $this->addPerformance($dayPerformance, $roomNights, $revenue, $occupiedNight, $totalRooms);
-                $this->addSource($daySources, $channel, $roomNights, $revenue);
+            if ($roomsOccupied > 0) {
+                $nightlyRevenue = $this->nightlyRevenue($reservation);
+                $this->addPerformance($dayPerformance, $roomsOccupied, $nightlyRevenue);
+                $dayRevenueByCurrency[$resCurrency] = ($dayRevenueByCurrency[$resCurrency] ?? 0) + $nightlyRevenue;
+                $this->addDailySourceRevenue($daySources, $channel, $roomsOccupied, $nightlyRevenue, $resCurrency);
             }
 
-            if ($checkout && $checkout->gte($periodStart) && $checkout->lte($date)) {
-                $this->addPerformance($periodPerformance, $roomNights, $revenue, $occupiedNight, $totalRooms);
-                $this->addSource($periodSources, $channel, $roomNights, $revenue);
-            }
+            foreach (CarbonPeriod::create($periodStart, $date) as $periodDay) {
+                $roomsOnDay = $this->occupiedRoomsOnNight($reservation, Carbon::parse($periodDay)->startOfDay());
 
-            if ($bookedOn && $bookedOn->equalTo($date)) {
-                $this->addPerformance($dayPickup, $roomNights, $revenue, 0, $totalRooms);
-                $this->addSource($pickupSources, $channel, $roomNights, $revenue);
-            }
+                if ($roomsOnDay <= 0) {
+                    continue;
+                }
 
-            if ($bookedOn && $bookedOn->gte($periodStart) && $bookedOn->lte($date)) {
-                $this->addPerformance($periodPickup, $roomNights, $revenue, 0, $totalRooms);
+                $nightlyRevenue = $this->nightlyRevenue($reservation);
+                $this->addPerformance($periodPerformance, $roomsOnDay, $nightlyRevenue);
+                $periodRevenueByCurrency[$resCurrency] = ($periodRevenueByCurrency[$resCurrency] ?? 0) + $nightlyRevenue;
+                $this->addDailySourceRevenue($periodSources, $channel, $roomsOnDay, $nightlyRevenue, $resCurrency);
             }
         }
 
         $dayOccupancy = $totalRooms > 0
-            ? round(($this->occupiedRoomCount($reservations, $date) / $totalRooms) * 100)
+            ? (int) round(($dayPerformance['rooms_sold'] / $totalRooms) * 100)
             : 0;
 
         $periodOccupancy = $this->averagePeriodOccupancy($reservations, $periodStart, $date, $totalRooms);
+
+        $dayRoomRevenue = $this->formatRevenueDisplayWithConversion($dayRevenueByCurrency, $currency, $date);
+        $periodRoomRevenue = $this->formatRevenueDisplayWithConversion($periodRevenueByCurrency, $currency, $date);
+        $serviceRows = $this->dailyReportServiceRows($hotel, $date, $periodStart, $currency);
+        $sourceRows = $this->formatDailySourceRows($daySources, $periodSources, $currency, $date);
+
+        $fxDates = array_filter([
+            $dayRoomRevenue['rate_date'],
+            $periodRoomRevenue['rate_date'],
+            $serviceRows['fx_rate_date'] ?? null,
+            $sourceRows['fx_rate_date'] ?? null,
+        ]);
 
         return [
             'report_date' => $date->format('Y-m-d'),
             'day_label' => $dayLabel,
             'period_label' => $periodLabel,
             'currency' => $currency,
-            'last_night' => [
-                ['label' => 'No. of Rooms Sold', 'day' => (string) $dayPerformance['rooms_sold'], 'period' => (string) $periodPerformance['rooms_sold']],
-                ['label' => 'Overall Occupancy (assumption)', 'day' => $dayOccupancy.' %', 'period' => $periodOccupancy.' %'],
-                ['label' => 'Revenue ('.$currency.')', 'day' => $this->formatMoney($dayPerformance['revenue']), 'period' => $this->formatMoney($periodPerformance['revenue'])],
-                ['label' => 'ARR ('.$currency.')', 'day' => $this->formatMoney($this->arr($dayPerformance)), 'period' => $this->formatMoney($this->arr($periodPerformance))],
-                ['label' => 'RevPAR ('.$currency.')', 'day' => $this->formatMoney($this->revpar($dayPerformance, $totalRooms)), 'period' => $this->formatMoney($this->revpar($periodPerformance, $totalRooms, $periodStart->diffInDays($date) + 1))],
+            'total_rooms' => $totalRooms,
+            'exchange_rate_note' => $this->dailyReportExchangeNote($currency, $fxDates),
+            'performance' => [
+                ['label' => 'Rooms Sold', 'day' => (string) $dayPerformance['rooms_sold'], 'period' => (string) $periodPerformance['rooms_sold']],
+                ['label' => 'Occupancy %', 'day' => $dayOccupancy.' %', 'period' => $periodOccupancy.' %'],
+                [
+                    'label' => 'Room revenue',
+                    'day' => $dayRoomRevenue['display'],
+                    'day_native' => $dayRoomRevenue['native'],
+                    'period' => $periodRoomRevenue['display'],
+                    'period_native' => $periodRoomRevenue['native'],
+                ],
+                [
+                    'label' => 'ARR',
+                    'day' => $this->dailyReportArrLabelWithFx($dayRevenueByCurrency, $dayPerformance['rooms_sold'], $currency, $date),
+                    'period' => $this->dailyReportArrLabelWithFx($periodRevenueByCurrency, $periodPerformance['rooms_sold'], $currency, $date),
+                ],
+                [
+                    'label' => 'RevPAR',
+                    'day' => $this->dailyReportRevparLabelWithFx($dayRevenueByCurrency, $totalRooms, 1, $currency, $date),
+                    'period' => $this->dailyReportRevparLabelWithFx($periodRevenueByCurrency, $totalRooms, $periodDays, $currency, $date),
+                ],
             ],
-            'sources' => $this->formatDailySourceRows($daySources, $periodSources),
-            'pickup' => $this->formatDailyPickupRows($pickupSources, $dayPickup, $periodPickup),
+            'sources' => $sourceRows['rows'],
+            'services' => $serviceRows['rows'],
         ];
     }
 
-    /** @return array{rooms_sold: int, revenue: float, occupied_nights: int} */
-    private function emptyPerformanceBucket(): array
+    private function dailyReportUseFx(): bool
     {
-        return ['rooms_sold' => 0, 'revenue' => 0.0, 'occupied_nights' => 0];
+        return (bool) config('hotel_analytics.daily_report.convert_mixed_currencies', true);
     }
 
-    /** @param  array{rooms_sold: int, revenue: float, occupied_nights: int}  $bucket */
-    private function addPerformance(array &$bucket, int $roomNights, float $revenue, int $occupiedNight, int $totalRooms): void
+    /**
+     * @param  array<string, float>  $amountsByCurrency
+     * @return array{display: string, native: ?string, rate_date: ?string}
+     */
+    private function formatRevenueDisplayWithConversion(array $amountsByCurrency, string $targetCurrency, Carbon $date): array
     {
-        $bucket['rooms_sold'] += $roomNights;
+        $native = $this->formatDailyRevenueAmounts($amountsByCurrency, $targetCurrency);
+        $active = $this->nonZeroCurrencyAmounts($amountsByCurrency);
+
+        if ($active === [] || ! $this->dailyReportUseFx() || ! $this->amountsNeedFxConversion($active, $targetCurrency)) {
+            return [
+                'display' => $native,
+                'native' => null,
+                'rate_date' => null,
+            ];
+        }
+
+        $sum = $this->exchangeRates->sumInCurrency($active, $targetCurrency, $date->format('Y-m-d'));
+        $display = $this->formatReportMoney($sum['total'], $targetCurrency);
+        if ($sum['failed'] !== []) {
+            $display .= ' + '.$this->formatDailyRevenueAmounts($sum['failed'], $targetCurrency);
+        }
+
+        return [
+            'display' => $display,
+            'native' => $native,
+            'rate_date' => $sum['rate_date'],
+        ];
+    }
+
+    /**
+     * @param  array<string, float>  $amountsByCurrency
+     * @return array<string, float>
+     */
+    private function nonZeroCurrencyAmounts(array $amountsByCurrency): array
+    {
+        return array_filter(
+            $amountsByCurrency,
+            fn ($amount): bool => abs((float) $amount) >= 0.009,
+        );
+    }
+
+    /**
+     * @param  array<string, float>  $amountsByCurrency
+     */
+    private function amountsNeedFxConversion(array $amountsByCurrency, string $targetCurrency): bool
+    {
+        $targetCurrency = strtoupper(trim($targetCurrency));
+        foreach (array_keys($amountsByCurrency) as $code) {
+            if (strtoupper(trim((string) $code)) !== $targetCurrency) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<string, float>  $amountsByCurrency
+     */
+    private function convertedRevenueTotal(array $amountsByCurrency, string $targetCurrency, Carbon $date): float
+    {
+        $active = $this->nonZeroCurrencyAmounts($amountsByCurrency);
+        if ($active === []) {
+            return 0.0;
+        }
+
+        if (! $this->dailyReportUseFx() || ! $this->amountsNeedFxConversion($active, $targetCurrency)) {
+            return round(array_sum($active), 2);
+        }
+
+        return $this->exchangeRates->sumInCurrency($active, $targetCurrency, $date->format('Y-m-d'))['total'];
+    }
+
+    /**
+     * @param  array<string, float>  $revenueByCurrency
+     */
+    private function dailyReportArrLabelWithFx(array $revenueByCurrency, int $roomsSold, string $targetCurrency, Carbon $date): string
+    {
+        if ($roomsSold <= 0) {
+            return $this->formatReportMoney(0, $targetCurrency);
+        }
+
+        $total = $this->convertedRevenueTotal($revenueByCurrency, $targetCurrency, $date);
+
+        return $this->formatReportMoney($total / $roomsSold, $targetCurrency);
+    }
+
+    /**
+     * @param  array<string, float>  $revenueByCurrency
+     */
+    private function dailyReportRevparLabelWithFx(array $revenueByCurrency, int $totalRooms, int $days, string $targetCurrency, Carbon $date): string
+    {
+        if ($totalRooms <= 0) {
+            return $this->formatReportMoney(0, $targetCurrency);
+        }
+
+        $available = max(1, $totalRooms * max(1, $days));
+        $total = $this->convertedRevenueTotal($revenueByCurrency, $targetCurrency, $date);
+
+        return $this->formatReportMoney($total / $available, $targetCurrency);
+    }
+
+    /** @param  list<?string>  $rateDates */
+    private function dailyReportExchangeNote(string $targetCurrency, array $rateDates): ?string
+    {
+        if (! $this->dailyReportUseFx()) {
+            return null;
+        }
+
+        $rateDates = array_values(array_unique(array_filter($rateDates)));
+        if ($rateDates === []) {
+            return null;
+        }
+
+        sort($rateDates);
+        $dateLabel = count($rateDates) === 1 ? $rateDates[0] : ($rateDates[0].' – '.end($rateDates));
+
+        return 'Mixed currencies converted to '.$targetCurrency.' using Frankfurter rates (as of '.$dateLabel.').';
+    }
+
+    private function reportCurrencyForHotel(Hotel $hotel): string
+    {
+        return app(BarPurchaseListService::class)->budgetCurrencyForHotel($hotel);
+    }
+
+    private function reservationReportCurrency(CmReservation $reservation, string $fallbackCurrency): string
+    {
+        $code = strtoupper(trim((string) ($reservation->currency ?? '')));
+
+        return $code !== '' ? $code : $fallbackCurrency;
+    }
+
+    /**
+     * @param  array<string, float>  $revenueByCurrency
+     */
+    private function formatDailyRevenueAmounts(array $revenueByCurrency, string $fallbackCurrency): string
+    {
+        if ($revenueByCurrency === []) {
+            return $this->formatReportMoney(0, $fallbackCurrency);
+        }
+
+        $parts = [];
+        ksort($revenueByCurrency);
+        foreach ($revenueByCurrency as $code => $amount) {
+            if (abs((float) $amount) < 0.009) {
+                continue;
+            }
+            $parts[] = $this->formatReportMoney((float) $amount, (string) $code);
+        }
+
+        return $parts !== [] ? implode(' · ', $parts) : $this->formatReportMoney(0, $fallbackCurrency);
+    }
+
+    /**
+     * @param  array<string, float>  $revenueByCurrency
+     */
+    private function dailyReportArrLabel(array $revenueByCurrency, int $roomsSold, string $fallbackCurrency): string
+    {
+        if ($roomsSold <= 0) {
+            return $this->formatReportMoney(0, $fallbackCurrency);
+        }
+
+        $active = array_filter($revenueByCurrency, fn ($amount): bool => abs((float) $amount) >= 0.009);
+        if (count($active) !== 1) {
+            return '—';
+        }
+
+        $code = (string) array_key_first($active);
+
+        return $this->formatReportMoney((float) $active[$code] / $roomsSold, $code);
+    }
+
+    /**
+     * @param  array<string, float>  $revenueByCurrency
+     */
+    private function dailyReportRevparLabel(array $revenueByCurrency, int $totalRooms, int $days, string $fallbackCurrency): string
+    {
+        $available = max(1, $totalRooms * max(1, $days));
+        if ($totalRooms <= 0) {
+            return $this->formatReportMoney(0, $fallbackCurrency);
+        }
+
+        $active = array_filter($revenueByCurrency, fn ($amount): bool => abs((float) $amount) >= 0.009);
+        if (count($active) !== 1) {
+            return '—';
+        }
+
+        $code = (string) array_key_first($active);
+
+        return $this->formatReportMoney((float) $active[$code] / $available, $code);
+    }
+
+    /**
+     * @param  array<string, array{rooms: int, by_currency: array<string, float>}>  $sources
+     */
+    private function addDailySourceRevenue(array &$sources, string $name, int $rooms, float $revenue, string $currency): void
+    {
+        if (! isset($sources[$name])) {
+            $sources[$name] = ['rooms' => 0, 'by_currency' => []];
+        }
+
+        $sources[$name]['rooms'] += $rooms;
+        $sources[$name]['by_currency'][$currency] = ($sources[$name]['by_currency'][$currency] ?? 0) + $revenue;
+    }
+
+    private function formatReportMoney(float $amount, string $currency): string
+    {
+        $currency = strtoupper(trim($currency ?: 'TZS'));
+        $wholeNumberCurrencies = ['TZS', 'UGX', 'RWF', 'BIF', 'JPY'];
+        $useZeroDecimals = in_array($currency, $wholeNumberCurrencies, true);
+        $decimals = 2;
+        if ($useZeroDecimals) {
+            $decimals = 0;
+        } elseif ($amount == floor($amount)) {
+            $decimals = 0;
+        }
+
+        return number_format($amount, $decimals).' '.$currency;
+    }
+
+    /**
+     * @param  array<string, array{count: int, revenue: float}>  $byCurrency
+     */
+    private function formatDailyRevenueMix(array $byCurrency, string $fallbackCurrency): string
+    {
+        $amounts = [];
+        foreach ($byCurrency as $code => $bucket) {
+            $amounts[(string) $code] = (float) ($bucket['revenue'] ?? 0);
+        }
+
+        return $this->formatDailyRevenueAmounts($amounts, $fallbackCurrency);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, object{currency?: string|null, total?: mixed}>  $records
+     * @return array{count: int, by_currency: array<string, array{count: int, revenue: float}>}
+     */
+    private function aggregateDailyRecordsByCurrency(Collection $records, string $fallbackCurrency, Hotel $hotel): array
+    {
+        $byCurrency = [];
+        foreach ($records as $record) {
+            $code = $this->serviceTransactionCurrency($record, $hotel, $fallbackCurrency);
+            if (! isset($byCurrency[$code])) {
+                $byCurrency[$code] = ['count' => 0, 'revenue' => 0.0];
+            }
+            $byCurrency[$code]['count']++;
+            $byCurrency[$code]['revenue'] += (float) ($record->total ?? 0);
+        }
+
+        return [
+            'count' => $records->count(),
+            'by_currency' => $byCurrency,
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function dailyReportServiceRows(Hotel $hotel, Carbon $date, Carbon $periodStart, string $reportCurrency): array
+    {
+        $definitions = config('hotel_analytics.daily_report.services', []);
+        $metricsByKey = [
+            'bar' => $this->dailyReportBarMetrics($hotel, $date, $periodStart, $reportCurrency),
+            'laundry' => $this->dailyReportLaundryMetrics($hotel, $date, $periodStart, $reportCurrency),
+            'swimming' => $this->dailyReportSwimmingMetrics($hotel, $date, $periodStart, $reportCurrency),
+            'conference' => $this->dailyReportConferenceMetrics($hotel, $date, $periodStart, $reportCurrency),
+        ];
+
+        $rows = [];
+        $dayCountTotal = 0;
+        $periodCountTotal = 0;
+        /** @var array<string, float> $dayRevenueTotals */
+        $dayRevenueTotals = [];
+        /** @var array<string, float> $periodRevenueTotals */
+        $periodRevenueTotals = [];
+
+        foreach ($definitions as $definition) {
+            $key = (string) ($definition['key'] ?? '');
+            $label = (string) ($definition['label'] ?? $key);
+            if ($key === '' || ! isset($metricsByKey[$key])) {
+                continue;
+            }
+
+            $metrics = $metricsByKey[$key];
+            $dayCountTotal += $metrics['day_count'];
+            $periodCountTotal += $metrics['period_count'];
+
+            foreach ($metrics['day_by_currency'] as $code => $amount) {
+                $dayRevenueTotals[$code] = ($dayRevenueTotals[$code] ?? 0) + (float) $amount;
+            }
+            foreach ($metrics['period_by_currency'] as $code => $amount) {
+                $periodRevenueTotals[$code] = ($periodRevenueTotals[$code] ?? 0) + (float) $amount;
+            }
+
+            $rows[] = [
+                'label' => $label,
+                'day_count' => (string) $metrics['day_count'],
+                'day_revenue' => $this->formatDailyRevenueAmounts($metrics['day_by_currency'], $reportCurrency),
+                'period_count' => (string) $metrics['period_count'],
+                'period_revenue' => $this->formatDailyRevenueAmounts($metrics['period_by_currency'], $reportCurrency),
+            ];
+        }
+
+        if ($rows === []) {
+            return ['rows' => [], 'fx_rate_date' => null];
+        }
+
+        $dayTotal = $this->formatRevenueDisplayWithConversion($dayRevenueTotals, $reportCurrency, $date);
+        $periodTotal = $this->formatRevenueDisplayWithConversion($periodRevenueTotals, $reportCurrency, $date);
+
+        $rows[] = [
+            'label' => 'Total',
+            'day_count' => (string) $dayCountTotal,
+            'day_revenue' => $dayTotal['display'],
+            'day_revenue_native' => $dayTotal['native'],
+            'period_count' => (string) $periodCountTotal,
+            'period_revenue' => $periodTotal['display'],
+            'period_revenue_native' => $periodTotal['native'],
+            'is_total' => true,
+        ];
+
+        return [
+            'rows' => $rows,
+            'fx_rate_date' => $periodTotal['rate_date'] ?? $dayTotal['rate_date'],
+        ];
+    }
+
+    /**
+     * @return array{day_count: int, period_count: int, day_by_currency: array<string, float>, period_by_currency: array<string, float>}
+     */
+    private function dailyReportBarMetrics(Hotel $hotel, Carbon $date, Carbon $periodStart, string $fallbackCurrency): array
+    {
+        $base = HotelBarSale::query()->where('hotel_id', $hotel->id);
+
+        return $this->dailyReportCountAndRevenue($base, 'sold_at', $date, $periodStart, $fallbackCurrency, $hotel);
+    }
+
+    /**
+     * @return array{day_count: int, period_count: int, day_by_currency: array<string, float>, period_by_currency: array<string, float>}
+     */
+    private function dailyReportLaundryMetrics(Hotel $hotel, Carbon $date, Carbon $periodStart, string $fallbackCurrency): array
+    {
+        $base = HotelLaundryOrder::query()
+            ->where('hotel_id', $hotel->id)
+            ->where('status', '!=', HotelLaundryOrder::STATUS_CANCELLED)
+            ->with('service');
+
+        return $this->dailyReportCountAndRevenue($base, 'received_at', $date, $periodStart, $fallbackCurrency, $hotel);
+    }
+
+    /**
+     * @return array{day_count: int, period_count: int, day_by_currency: array<string, float>, period_by_currency: array<string, float>}
+     */
+    private function dailyReportSwimmingMetrics(Hotel $hotel, Carbon $date, Carbon $periodStart, string $fallbackCurrency): array
+    {
+        $base = HotelSwimmingVisit::query()
+            ->where('hotel_id', $hotel->id)
+            ->where('status', '!=', HotelSwimmingVisit::STATUS_CANCELLED)
+            ->with('service');
+
+        $dayRecords = (clone $base)->where(function (Builder $query) use ($date) {
+            $this->scopeSwimmingOnReportDay($query, $date);
+        })->get();
+
+        $periodRecords = (clone $base)->where(function (Builder $query) use ($periodStart, $date) {
+            $this->scopeSwimmingInReportPeriod($query, $periodStart, $date);
+        })->get();
+
+        $day = $this->aggregateDailyRecordsByCurrency($dayRecords, $fallbackCurrency, $hotel);
+        $period = $this->aggregateDailyRecordsByCurrency($periodRecords, $fallbackCurrency, $hotel);
+
+        return $this->packageDailyServiceMetrics($day, $period);
+    }
+
+    /**
+     * @return array{day_count: int, period_count: int, day_by_currency: array<string, float>, period_by_currency: array<string, float>}
+     */
+    private function dailyReportConferenceMetrics(Hotel $hotel, Carbon $date, Carbon $periodStart, string $fallbackCurrency): array
+    {
+        $base = HotelConferenceBooking::query()
+            ->where('hotel_id', $hotel->id)
+            ->where('status', '!=', HotelConferenceBooking::STATUS_CANCELLED)
+            ->with('service');
+
+        return $this->dailyReportCountAndRevenue($base, 'starts_at', $date, $periodStart, $fallbackCurrency, $hotel);
+    }
+
+    /**
+     * @param  array{count: int, by_currency: array<string, array{count: int, revenue: float}>}  $day
+     * @param  array{count: int, by_currency: array<string, array{count: int, revenue: float}>}  $period
+     * @return array{day_count: int, period_count: int, day_by_currency: array<string, float>, period_by_currency: array<string, float>}
+     */
+    private function packageDailyServiceMetrics(array $day, array $period): array
+    {
+        return [
+            'day_count' => $day['count'],
+            'period_count' => $period['count'],
+            'day_by_currency' => $this->revenueAmountsFromServiceBuckets($day['by_currency']),
+            'period_by_currency' => $this->revenueAmountsFromServiceBuckets($period['by_currency']),
+        ];
+    }
+
+    /**
+     * @param  array<string, array{count: int, revenue: float}>  $byCurrency
+     * @return array<string, float>
+     */
+    private function revenueAmountsFromServiceBuckets(array $byCurrency): array
+    {
+        $amounts = [];
+        foreach ($byCurrency as $code => $bucket) {
+            $amounts[(string) $code] = (float) ($bucket['revenue'] ?? 0);
+        }
+
+        return $amounts;
+    }
+
+    /**
+     * @param  Builder<\Illuminate\Database\Eloquent\Model>  $base
+     * @return array{day_count: int, period_count: int, day_by_currency: array<string, float>, period_by_currency: array<string, float>}
+     */
+    private function dailyReportCountAndRevenue(
+        Builder $base,
+        string $dateColumn,
+        Carbon $date,
+        Carbon $periodStart,
+        string $fallbackCurrency,
+        Hotel $hotel,
+    ): array {
+        $dayStart = $date->copy()->startOfDay();
+        $dayEnd = $date->copy()->endOfDay();
+        $periodBegin = $periodStart->copy()->startOfDay();
+        $periodEnd = $date->copy()->endOfDay();
+
+        $dayRecords = (clone $base)->whereBetween($dateColumn, [$dayStart, $dayEnd])->get();
+        $periodRecords = (clone $base)->whereBetween($dateColumn, [$periodBegin, $periodEnd])->get();
+
+        $day = $this->aggregateDailyRecordsByCurrency($dayRecords, $fallbackCurrency, $hotel);
+        $period = $this->aggregateDailyRecordsByCurrency($periodRecords, $fallbackCurrency, $hotel);
+
+        return $this->packageDailyServiceMetrics($day, $period);
+    }
+
+    private function serviceTransactionCurrency(object $record, Hotel $hotel, string $fallbackCurrency): string
+    {
+        if ($record instanceof HotelLaundryOrder) {
+            return strtoupper($record->displayCurrency($hotel));
+        }
+
+        if ($record instanceof HotelSwimmingVisit) {
+            $code = strtoupper(trim((string) ($record->currency ?? '')));
+            if ($code !== '') {
+                return $code;
+            }
+            $record->loadMissing('service');
+            if ($record->service) {
+                return strtoupper($record->service->displayCurrency($hotel));
+            }
+        }
+
+        if ($record instanceof HotelConferenceBooking) {
+            $code = strtoupper(trim((string) ($record->currency ?? '')));
+            if ($code !== '') {
+                return $code;
+            }
+            $record->loadMissing('service');
+            if ($record->service) {
+                return strtoupper($record->service->displayCurrency($hotel));
+            }
+        }
+
+        $code = strtoupper(trim((string) ($record->currency ?? '')));
+
+        return $code !== '' ? $code : $fallbackCurrency;
+    }
+
+    /** @param  Builder<HotelSwimmingVisit>  $query */
+    private function scopeSwimmingOnReportDay(Builder $query, Carbon $date): void
+    {
+        $query->where(function (Builder $inner) use ($date) {
+            $inner->whereDate('entered_at', $date)
+                ->orWhere(function (Builder $fallback) use ($date) {
+                    $fallback->whereNull('entered_at')
+                        ->whereDate('scheduled_date', $date);
+                });
+        });
+    }
+
+    /** @param  Builder<HotelSwimmingVisit>  $query */
+    private function scopeSwimmingInReportPeriod(Builder $query, Carbon $periodStart, Carbon $date): void
+    {
+        $from = $periodStart->copy()->startOfDay()->format('Y-m-d');
+        $to = $date->copy()->format('Y-m-d');
+
+        $query->where(function (Builder $inner) use ($from, $to) {
+            $inner->where(function (Builder $entered) use ($from, $to) {
+                $entered->whereNotNull('entered_at')
+                    ->whereDate('entered_at', '>=', $from)
+                    ->whereDate('entered_at', '<=', $to);
+            })->orWhere(function (Builder $scheduled) use ($from, $to) {
+                $scheduled->whereNull('entered_at')
+                    ->whereDate('scheduled_date', '>=', $from)
+                    ->whereDate('scheduled_date', '<=', $to);
+            });
+        });
+    }
+
+    private function nightlyRevenue(CmReservation $reservation): float
+    {
+        $total = (float) ($reservation->amount_after_tax ?? 0);
+        $nights = max(1, (int) ($reservation->roomNightCount() ?? 1));
+
+        return round($total / $nights, 2);
+    }
+
+    /** @return array{rooms_sold: int, revenue: float} */
+    private function emptyPerformanceBucket(): array
+    {
+        return ['rooms_sold' => 0, 'revenue' => 0.0];
+    }
+
+    /** @param  array{rooms_sold: int, revenue: float}  $bucket */
+    private function addPerformance(array &$bucket, int $roomsSold, float $revenue): void
+    {
+        $bucket['rooms_sold'] += $roomsSold;
         $bucket['revenue'] += $revenue;
-        $bucket['occupied_nights'] += $occupiedNight;
     }
 
     /** @param  array<string, array{rooms: int, revenue: float}>  $sources */
@@ -468,13 +1024,13 @@ class HotelAnalyticsService
         $sources[$name]['revenue'] += $revenue;
     }
 
-    /** @param  array{rooms_sold: int, revenue: float, occupied_nights: int}  $bucket */
+    /** @param  array{rooms_sold: int, revenue: float}  $bucket */
     private function arr(array $bucket): float
     {
         return $bucket['rooms_sold'] > 0 ? round($bucket['revenue'] / $bucket['rooms_sold'], 2) : 0;
     }
 
-    /** @param  array{rooms_sold: int, revenue: float, occupied_nights: int}  $bucket */
+    /** @param  array{rooms_sold: int, revenue: float}  $bucket */
     private function revpar(array $bucket, int $totalRooms, int $days = 1): float
     {
         $available = max(1, $totalRooms * max(1, $days));
@@ -527,11 +1083,14 @@ class HotelAnalyticsService
     }
 
     /**
-     * @param  array<string, array{rooms: int, revenue: float}>  $daySources
-     * @param  array<string, array{rooms: int, revenue: float}>  $periodSources
+     * @param  array<string, array{rooms: int, by_currency: array<string, float>}>  $daySources
+     * @param  array<string, array{rooms: int, by_currency: array<string, float>}>  $periodSources
      * @return list<array<string, mixed>>
      */
-    private function formatDailySourceRows(array $daySources, array $periodSources): array
+    /**
+     * @return array{rows: list<array<string, mixed>>, fx_rate_date: ?string}
+     */
+    private function formatDailySourceRows(array $daySources, array $periodSources, string $currency, Carbon $date): array
     {
         $names = collect(array_keys($daySources))
             ->merge(array_keys($periodSources))
@@ -540,71 +1099,66 @@ class HotelAnalyticsService
             ->values();
 
         if ($names->isEmpty()) {
-            return [[
-                'label' => 'Total',
-                'day_rooms' => '0',
-                'day_usd' => '0',
-                'period_rooms' => '0',
-                'period_usd' => '0',
-            ]];
+            return [
+                'rows' => [[
+                    'label' => 'Total',
+                    'day_rooms' => '0',
+                    'day_revenue' => $this->formatReportMoney(0, $currency),
+                    'period_rooms' => '0',
+                    'period_revenue' => $this->formatReportMoney(0, $currency),
+                ]],
+                'fx_rate_date' => null,
+            ];
         }
 
         $rows = [];
+        $dayRevenueTotals = [];
+        $periodRevenueTotals = [];
 
         foreach ($names as $name) {
-            if (($daySources[$name]['rooms'] ?? 0) === 0 && ($daySources[$name]['revenue'] ?? 0) == 0) {
+            $dayRooms = (int) ($daySources[$name]['rooms'] ?? 0);
+            $dayByCurrency = $daySources[$name]['by_currency'] ?? [];
+            $periodRooms = (int) ($periodSources[$name]['rooms'] ?? 0);
+            $periodByCurrency = $periodSources[$name]['by_currency'] ?? [];
+
+            foreach ($dayByCurrency as $code => $amount) {
+                $dayRevenueTotals[$code] = ($dayRevenueTotals[$code] ?? 0) + (float) $amount;
+            }
+            foreach ($periodByCurrency as $code => $amount) {
+                $periodRevenueTotals[$code] = ($periodRevenueTotals[$code] ?? 0) + (float) $amount;
+            }
+
+            if ($dayRooms === 0 && $dayByCurrency === [] && $periodRooms === 0 && $periodByCurrency === []) {
                 continue;
             }
 
             $rows[] = [
                 'label' => $name,
-                'day_rooms' => (string) ($daySources[$name]['rooms'] ?? 0),
-                'day_usd' => $this->formatMoney($daySources[$name]['revenue'] ?? 0),
-                'period_rooms' => (string) ($periodSources[$name]['rooms'] ?? 0),
-                'period_usd' => $this->formatMoney($periodSources[$name]['revenue'] ?? 0),
+                'day_rooms' => (string) $dayRooms,
+                'day_revenue' => $this->formatDailyRevenueAmounts($dayByCurrency, $currency),
+                'period_rooms' => (string) $periodRooms,
+                'period_revenue' => $this->formatDailyRevenueAmounts($periodByCurrency, $currency),
             ];
         }
+
+        $dayTotal = $this->formatRevenueDisplayWithConversion($dayRevenueTotals, $currency, $date);
+        $periodTotal = $this->formatRevenueDisplayWithConversion($periodRevenueTotals, $currency, $date);
 
         $rows[] = [
             'label' => 'Total',
             'day_rooms' => (string) collect($daySources)->sum('rooms'),
-            'day_usd' => $this->formatMoney(collect($daySources)->sum('revenue')),
+            'day_revenue' => $dayTotal['display'],
+            'day_revenue_native' => $dayTotal['native'],
             'period_rooms' => (string) collect($periodSources)->sum('rooms'),
-            'period_usd' => $this->formatMoney(collect($periodSources)->sum('revenue')),
+            'period_revenue' => $periodTotal['display'],
+            'period_revenue_native' => $periodTotal['native'],
+            'is_total' => true,
         ];
 
-        return $rows;
-    }
-
-    /**
-     * @param  array<string, array{rooms: int, revenue: float}>  $pickupSources
-     * @param  array{rooms_sold: int, revenue: float, occupied_nights: int}  $dayPickup
-     * @param  array{rooms_sold: int, revenue: float, occupied_nights: int}  $periodPickup
-     * @return list<array<string, mixed>>
-     */
-    private function formatDailyPickupRows(array $pickupSources, array $dayPickup, array $periodPickup): array
-    {
-        $rows = [];
-
-        foreach ($pickupSources as $name => $data) {
-            $rows[] = [
-                'label' => $name,
-                'day_rns' => (string) $data['rooms'],
-                'day_usd' => $this->formatMoney($data['revenue']),
-                'period_rns' => '0',
-                'period_usd' => '0',
-            ];
-        }
-
-        $rows[] = [
-            'label' => 'Total',
-            'day_rns' => (string) $dayPickup['rooms_sold'],
-            'day_usd' => $this->formatMoney($dayPickup['revenue']),
-            'period_rns' => (string) $periodPickup['rooms_sold'],
-            'period_usd' => $this->formatMoney($periodPickup['revenue']),
+        return [
+            'rows' => $rows,
+            'fx_rate_date' => $periodTotal['rate_date'] ?? $dayTotal['rate_date'],
         ];
-
-        return $rows;
     }
 
     /** @return array<string, mixed> */
@@ -980,6 +1534,16 @@ class HotelAnalyticsService
 
     private function totalSellableRooms(Hotel $hotel): int
     {
+        $unitCount = HotelRoomUnit::query()
+            ->where('hotel_id', $hotel->id)
+            ->where('status', '!=', HotelRoomUnit::STATUS_INACTIVE)
+            ->whereHas('roomType', fn (Builder $query) => $query->where('is_enabled', true))
+            ->count();
+
+        if ($unitCount > 0) {
+            return $unitCount;
+        }
+
         $rooms = HotelRoom::query()
             ->where('hotel_id', $hotel->id)
             ->where('is_enabled', true)

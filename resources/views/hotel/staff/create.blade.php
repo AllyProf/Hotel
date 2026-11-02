@@ -18,7 +18,7 @@
       <div class="tile">
         <h3 class="tile-title">Staff Details</h3>
         <div class="tile-body">
-          <form action="{{ route('hotel.staff.store') }}" method="POST">
+          <form action="{{ route('hotel.staff.store') }}" method="POST" enctype="multipart/form-data">
             @csrf
             @include('hotel.staff.partials._form-fields')
             <div class="tile-footer">
@@ -31,3 +31,5 @@
     </div>
   </div>
 @endsection
+
+@include('hotel.staff.partials._staff-form-scripts')

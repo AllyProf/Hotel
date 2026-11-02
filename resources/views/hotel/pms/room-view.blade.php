@@ -104,7 +104,9 @@
     .rv-dot.is-assigned { background: #f8bbd0; }
     .rv-dot.is-checked-in { background: #86efac; }
     .rv-dot.is-checking-out { background: #f87171; }
-    .rv-dot.is-maintenance { background: #9ca3af; }
+    .rv-dot.is-dirty { background: #fb923c; }
+    .rv-dot.is-cleaned { background: #22c55e; }
+    .rv-dot.is-maintenance { background: #ef4444; }
     .rv-dot.is-complimentary { background: #fde047; }
 
     .rv-toolbar-actions {
@@ -368,11 +370,21 @@
       gap: 4px;
     }
 
-    .rv-room-card.is-available .rv-room-card__top { background: #eceff1; }
+    .rv-room-card.is-available .rv-room-card__top { background: #bbf7d0; }
     .rv-room-card.is-assigned .rv-room-card__top { background: #fce7f3; }
     .rv-room-card.is-checked-in .rv-room-card__top { background: #dcfce7; }
     .rv-room-card.is-checking-out .rv-room-card__top { background: #fee2e2; }
-    .rv-room-card.is-maintenance .rv-room-card__top { background: #e5e7eb; }
+    .rv-room-card.is-dirty .rv-room-card__top { background: #ffedd5; }
+    .rv-room-card.is-cleaned .rv-room-card__top { background: #bbf7d0; }
+    .rv-room-card__clean {
+      margin-top: 6px;
+    }
+    .rv-room-card__clean .btn {
+      font-size: 11px;
+      padding: 2px 8px;
+      line-height: 1.4;
+    }
+    .rv-room-card.is-maintenance .rv-room-card__top { background: #fecaca; }
     .rv-room-card.is-complimentary .rv-room-card__top { background: #fef9c3; }
 
     .rv-room-card__number {
@@ -526,6 +538,20 @@
                   </div>
                   <div class="rv-room-card__body {{ $unit['guest'] ? '' : 'is-empty' }}">
                     {{ $unit['guest'] ?? '' }}
+                    @if(($unit['state'] ?? '') === 'dirty' && is_int($unit['id'] ?? null))
+                      <form method="POST" action="{{ route('hotel.room-view.mark-clean', $unit['id']) }}" class="rv-room-card__clean mb-0">
+                        @csrf
+                        <input type="hidden" name="date" value="{{ $date->format('Y-m-d') }}">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">Mark cleaned</button>
+                      </form>
+                    @endif
+                    @if(($unit['state'] ?? '') === 'cleaned' && is_int($unit['id'] ?? null))
+                      <form method="POST" action="{{ route('hotel.room-view.mark-available', $unit['id']) }}" class="rv-room-card__clean mb-0">
+                        @csrf
+                        <input type="hidden" name="date" value="{{ $date->format('Y-m-d') }}">
+                        <button type="submit" class="btn btn-sm btn-primary">Mark available</button>
+                      </form>
+                    @endif
                   </div>
                 </article>
               @endforeach

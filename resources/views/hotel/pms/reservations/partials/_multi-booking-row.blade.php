@@ -5,10 +5,15 @@
   $planId = (int) ($booking['hotel_rate_plan_id'] ?? ($options['default_rate_plan_id'] ?? 0));
   $roomCount = (int) ($booking['room_count'] ?? 1);
   $guestCount = (int) ($booking['guest_count'] ?? 1);
-  $dailyRate = $booking['daily_rate'] ?? ($options['default_rate'] ?? 0);
   $taxInclusive = ! empty($booking['tax_inclusive']);
   $countryCode = $booking['guest_country_code'] ?? ($options['default_country_code'] ?? '');
   $city = $booking['guest_city'] ?? '';
+  $phoneCountryCode = $booking['guest_phone_country_code'] ?? ($options['default_phone_code'] ?? '');
+  $guestPhone = $booking['guest_phone'] ?? '';
+  $discountType = $booking['discount_type'] ?? 'percent';
+  $discountValue = $booking['discount_value'] ?? ($booking['discount_percent'] ?? 0);
+  $advanceAmount = $booking['advance_amount'] ?? 0;
+  $advanceComments = $booking['advance_comments'] ?? '';
 @endphp
 
 <div class="mb-booking-block" data-index="{{ $index }}">
@@ -59,16 +64,11 @@
         @endfor
       </select>
     </div>
-    <div class="mb-field">
-      <label class="control-label small">PreTaxRate/Day</label>
-      <input type="number" step="0.01" min="0" class="form-control form-control-sm js-mb-daily-rate"
-        name="bookings[{{ $index }}][daily_rate]" value="{{ $dailyRate }}" required>
-    </div>
     <div class="mb-field mb-field--check">
       <label class="animated-checkbox mb-0 mt-4">
         <input type="checkbox" name="bookings[{{ $index }}][tax_inclusive]" value="1" class="js-mb-tax-inclusive"
           {{ $taxInclusive ? 'checked' : '' }}>
-        <span class="label-text small">Tax Inclusive</span>
+        <span class="label-text small">Tax Inclusive (VAT {{ number_format($options['vat_rate'] ?? 18, 2) }}%)</span>
       </label>
     </div>
     <div class="mb-field mb-field--actions">
@@ -96,20 +96,35 @@
     </div>
     <div class="mb-field mb-field--wide">
       <label class="control-label small">Email</label>
-      <input type="email" class="form-control form-control-sm js-mb-guest-email" name="bookings[{{ $index }}][guest_email]"
-        value="{{ $booking['guest_email'] ?? '' }}">
+      <div class="mb-email-wrap">
+        <input type="email" class="form-control form-control-sm js-mb-guest-email" name="bookings[{{ $index }}][guest_email]"
+          value="{{ $booking['guest_email'] ?? '' }}" placeholder="Enter email" autocomplete="off">
+        <div class="mb-email-suggest js-mb-email-suggest" role="listbox"></div>
+      </div>
     </div>
-    <div class="mb-field">
+    <div class="mb-field mb-field--wide">
       <label class="control-label small">Phone</label>
-      <input type="text" class="form-control form-control-sm js-mb-guest-phone" name="bookings[{{ $index }}][guest_phone]"
-        value="{{ $booking['guest_phone'] ?? '' }}">
+      <div class="mb-phone-group">
+        <select class="js-mb-phone-code" id="mb_phone_code_{{ $index }}" aria-label="Phone country code"></select>
+        <input type="hidden" class="js-mb-phone-country-code" name="bookings[{{ $index }}][guest_phone_country_code]"
+          value="{{ $phoneCountryCode }}">
+        <input type="text" class="form-control form-control-sm js-mb-guest-phone" name="bookings[{{ $index }}][guest_phone]"
+          value="{{ $guestPhone }}" placeholder="Phone number">
+      </div>
     </div>
     <div class="mb-field">
       <label class="control-label small">Payment Mode</label>
-      <select class="form-control form-control-sm" name="bookings[{{ $index }}][payment_mode]">
+      <select class="form-control form-control-sm js-mb-payment-mode" name="bookings[{{ $index }}][payment_mode]">
         @foreach($options['payment_modes'] as $mode)
           <option value="{{ $mode }}" {{ ($booking['payment_mode'] ?? $options['default_payment_mode'] ?? '') === $mode ? 'selected' : '' }}>{{ $mode }}</option>
         @endforeach
+      </select>
+    </div>
+    <div class="mb-field js-mb-payment-provider-wrap d-none">
+      <label class="control-label small js-mb-payment-provider-label">Provider</label>
+      <select class="form-control form-control-sm js-mb-payment-provider" name="bookings[{{ $index }}][payment_provider]"
+        data-selected="{{ $booking['payment_provider'] ?? '' }}">
+        <option value="">Select provider</option>
       </select>
     </div>
     <div class="mb-field mb-field--wide">
@@ -128,6 +143,47 @@
       </select>
       <input type="hidden" class="js-mb-country-name" name="bookings[{{ $index }}][guest_country]"
         value="{{ $booking['guest_country'] ?? ($options['default_country'] ?? '') }}">
+    </div>
+  </div>
+
+  <div class="mb-booking-block__row mb-booking-block__row--payment">
+    <div class="mb-field">
+      <label class="control-label small">Amount Paid</label>
+      <input type="number" step="0.01" min="0" class="form-control form-control-sm js-mb-advance-amount"
+        name="bookings[{{ $index }}][advance_amount]" value="{{ $advanceAmount }}">
+    </div>
+    <div class="mb-field mb-field--wide">
+      <label class="control-label small">Discount</label>
+      <div class="mb-discount-wrap">
+        <select class="form-control form-control-sm js-mb-discount-type" name="bookings[{{ $index }}][discount_type]">
+          <option value="percent" {{ $discountType === 'percent' ? 'selected' : '' }}>By %</option>
+          <option value="amount" {{ $discountType === 'amount' ? 'selected' : '' }}>By amount</option>
+        </select>
+        <div class="input-group input-group-sm">
+          <input type="number" step="0.01" min="0" @if($discountType === 'percent') max="100" @endif
+            class="form-control js-mb-discount" name="bookings[{{ $index }}][discount_value]" value="{{ $discountValue }}">
+          <div class="input-group-append">
+            <span class="input-group-text js-mb-discount-suffix">{{ $discountType === 'amount' ? ($options['currency'] ?? 'USD') : '%' }}</span>
+          </div>
+        </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm js-mb-discount-undo">Undo</button>
+      </div>
+    </div>
+    <div class="mb-field mb-field--wide">
+      <label class="control-label small">Payment notes</label>
+      <input type="text" class="form-control form-control-sm js-mb-advance-comments"
+        name="bookings[{{ $index }}][advance_comments]" value="{{ $advanceComments }}"
+        placeholder="Payment or booking notes">
+    </div>
+    <div class="mb-field mb-field--summary">
+      <div class="mb-row-total-summary">
+        <span>Subtotal: <strong class="js-mb-subtotal">0.00</strong> {{ $options['currency'] ?? 'USD' }}</span>
+        <span>Discount: <strong class="js-mb-discount-amount">0.00</strong> {{ $options['currency'] ?? 'USD' }}</span>
+        <span>Total: <strong class="js-mb-total">0.00</strong> {{ $options['currency'] ?? 'USD' }}</span>
+        <span class="js-mb-remaining-wrap is-hidden">
+          Remaining: <strong class="js-mb-remaining">0.00</strong> {{ $options['currency'] ?? 'USD' }}
+        </span>
+      </div>
     </div>
   </div>
 </div>

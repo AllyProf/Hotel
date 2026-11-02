@@ -32,7 +32,7 @@
                 <div class="rates-ota-row">
                   <div class="rates-ota-info">
                     @if(!empty($ota['logo']))
-                      <img src="{{ asset('panel-assets/img/otas/' . $ota['logo']) }}" alt="{{ $ota['name'] }}" class="rates-ota-logo">
+                      <img src="{{ asset('panel-assets/img/otas/' . $ota['logo']) }}" alt="{{ $ota['name'] }}" class="rates-ota-logo" loading="lazy" decoding="async" width="32" height="32">
                     @endif
                     <span class="rates-ota-name">{{ $ota['name'] }}</span>
                   </div>
@@ -147,8 +147,8 @@
 @push('styles')
   <style>
     :root {
-      --rates-brand: #940000;
-      --rates-brand-hover: #7a0000;
+      --rates-brand: var(--brand);
+      --rates-brand-hover: var(--brand-dark);
     }
 
     .rates-confirm-modal .modal-header,

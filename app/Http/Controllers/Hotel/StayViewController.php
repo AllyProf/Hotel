@@ -11,6 +11,7 @@ use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use InvalidArgumentException;
 
 class StayViewController extends Controller
 {
@@ -73,5 +74,46 @@ class StayViewController extends Controller
         return redirect()
             ->route('hotel.stay-view', ['start' => $start->format('Y-m-d')])
             ->with($result['success'] ? 'success' : 'warning', $result['message']);
+    }
+
+    public function seedSampleBookings(Request $request): RedirectResponse
+    {
+        $hotel = auth()->user()->hotel()->firstOrFail();
+        $start = $request->filled('start')
+            ? Carbon::parse($request->input('start'))->startOfDay()
+            : now()->startOfDay();
+
+        try {
+            $result = $this->stayView->seedSampleBookings($hotel, $start);
+        } catch (InvalidArgumentException $e) {
+            return redirect()
+                ->route('hotel.stay-view', ['start' => $start->format('Y-m-d')])
+                ->with('error', $e->getMessage());
+        }
+
+        $this->logs->record($hotel, [
+            'action_type' => 'Stay View sample bookings',
+            'details' => $result['message'],
+        ]);
+
+        return redirect()
+            ->route('hotel.stay-view', ['start' => $start->format('Y-m-d')])
+            ->with('success', $result['message']);
+    }
+
+    public function clearSampleBookings(Request $request): RedirectResponse
+    {
+        $hotel = auth()->user()->hotel()->firstOrFail();
+        $start = $request->filled('start')
+            ? Carbon::parse($request->input('start'))->startOfDay()
+            : now()->startOfDay();
+
+        $removed = $this->stayView->clearSampleBookings($hotel);
+
+        return redirect()
+            ->route('hotel.stay-view', ['start' => $start->format('Y-m-d')])
+            ->with('success', $removed > 0
+                ? "Removed {$removed} sample booking(s)."
+                : 'No sample bookings to remove.');
     }
 }

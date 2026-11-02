@@ -21,6 +21,13 @@
     <label>&nbsp;</label>
     <button type="submit" class="btn btn-ac btn-block">Submit</button>
   </div>
+  @if($filters['reconciliation_submitted'])
+    <div>
+      <label>&nbsp;</label>
+      <a href="{{ route('hotel.accounts.reconciliation.export', request()->query()) }}"
+        class="btn btn-ac-outline btn-block text-center">Export Excel</a>
+    </div>
+  @endif
 </form>
 
 <div class="ac-content">

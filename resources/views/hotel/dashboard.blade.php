@@ -1,286 +1,291 @@
 @extends('layouts.app')
 
-@section('title', 'Hotel Dashboard')
+@section('title', 'Dashboard')
 
 @push('styles')
   <style>
-    .hotel-module-card {
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      border-radius: 4px;
-      padding: 18px;
-      height: 100%;
+    :root {
+      --hd-brand: #940000;
+      --hd-brand-dark: #7a0000;
+    }
+
+    .hd-stat {
       background: #fff;
-      transition: box-shadow 0.2s ease, border-color 0.2s ease;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      padding: 18px 20px;
+      height: 100%;
     }
-    .hotel-module-card:hover {
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
-      border-color: rgba(148, 0, 0, 0.25);
-    }
-    .hotel-module-card__icon {
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      background: rgba(148, 0, 0, 0.1);
-      color: #940000;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      margin-bottom: 12px;
-    }
-    .hotel-start-step {
-      display: flex;
-      gap: 14px;
-      align-items: flex-start;
-      padding: 14px 0;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-    }
-    .hotel-start-step:last-child { border-bottom: 0; padding-bottom: 0; }
-    .hotel-start-step__num {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      background: #940000;
-      color: #fff;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
+
+    .hd-stat__label {
+      font-size: 12px;
       font-weight: 700;
-      flex: 0 0 32px;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-bottom: 6px;
     }
-    .integration-tile {
-      border-top: 3px solid #940000;
+
+    .hd-stat__value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #111827;
+      line-height: 1.1;
     }
-    .hotel-dash-card {
-      border-top: 3px solid #940000;
+
+    .hd-stat__sub {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 4px;
     }
-    .integration-ota-chip {
+
+    .hd-stat.is-brand {
+      border-top: 3px solid var(--hd-brand);
+    }
+
+    .hd-panel {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      height: 100%;
+    }
+
+    .hd-panel__head {
       display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid #eee;
+    }
+
+    .hd-panel__head h3 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .hd-panel__head a {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--hd-brand);
+      text-decoration: none;
+    }
+
+    .hd-panel__head a:hover {
+      text-decoration: underline;
+    }
+
+    .hd-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .hd-table th {
+      background: var(--hd-brand);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 8px 14px;
+      border: 1px solid var(--hd-brand-dark);
+      white-space: nowrap;
+    }
+
+    .hd-table td {
+      padding: 10px 14px;
+      font-size: 13px;
+      border-bottom: 1px solid #eee;
+      vertical-align: middle;
+    }
+
+    .hd-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .hd-table tbody tr:hover td {
+      background: #fafafa;
+    }
+
+    .hd-guest {
+      font-weight: 600;
+      color: #222;
+    }
+
+    .hd-empty {
+      padding: 32px 18px;
+      text-align: center;
+      color: #9ca3af;
+      font-size: 13px;
+    }
+
+    .hd-quick {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .hd-quick a {
+      display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 10px;
-      border: 1px solid rgba(0,0,0,.08);
+      padding: 8px 14px;
+      border: 1px solid #d1d5db;
       border-radius: 4px;
       background: #fff;
+      color: #444;
       font-size: 13px;
       font-weight: 600;
-    }
-    .integration-ota-chip img {
-      width: 24px;
-      height: 24px;
-      object-fit: contain;
-    }
-    .integration-accordion .card-header {
-      padding: 0;
-    }
-    .integration-accordion .btn-link {
-      color: #333;
-      font-weight: 700;
       text-decoration: none;
-      padding: 12px 16px;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
     }
-    .integration-accordion .btn-link:hover {
-      color: #940000;
+
+    .hd-quick a:hover {
+      border-color: var(--hd-brand);
+      color: var(--hd-brand);
+      background: rgba(148, 0, 0, 0.04);
+      text-decoration: none;
+    }
+
+    .hd-date {
+      font-size: 13px;
+      color: #6b7280;
     }
   </style>
 @endpush
 
 @section('content')
+  @php
+    $stats = $snapshot['stats'] ?? [];
+    $arrivals = $snapshot['arrivals'] ?? [];
+    $departures = $snapshot['departures'] ?? [];
+    $today = $snapshot['date'] ?? now();
+  @endphp
+
   <div class="app-title">
     <div>
-      <h1><i class="fa fa-dashboard"></i> Welcome, {{ auth()->user()->name }}</h1>
-      <p>{{ $hotel?->name ?? 'Hotel' }} — choose a module below to get started</p>
+      <h1><i class="fa fa-dashboard"></i> {{ $hotel?->display_name ?: $hotel?->name ?? 'Dashboard' }}</h1>
+      <p class="hd-date mb-0">{{ $today->format('l, d M Y') }} · Front desk overview</p>
     </div>
     <ul class="app-breadcrumb breadcrumb">
       <li class="breadcrumb-item"><i class="fa fa-home fa-lg"></i></li>
-      <li class="breadcrumb-item"><a href="#">Dashboard</a></li>
+      <li class="breadcrumb-item">Dashboard</li>
     </ul>
   </div>
 
-  <div class="row">
-    <div class="col-md-6 col-lg-3">
-      <div class="widget-small primary coloured-icon">
-        <i class="icon fa fa-credit-card fa-3x"></i>
-        <div class="info">
-          <h4>Your Plan</h4>
-          <p><b>{{ $hotel?->plan?->name ?? 'None' }}</b></p>
-        </div>
+  @if(($stats['lost_found_open'] ?? 0) > 0)
+    <div class="alert alert-warning mb-3">
+      <strong><i class="fa fa-search"></i> Lost &amp; Found:</strong>
+      {{ $stats['lost_found_open'] }} item(s) in storage
+      @if(($stats['lost_found_today'] ?? 0) > 0)
+        · {{ $stats['lost_found_today'] }} logged today
+      @endif
+      —
+      <a href="{{ route('hotel.lost-found.index', ['filter' => 'open']) }}" class="alert-link font-weight-bold">Open register</a>
+    </div>
+  @endif
+
+  <div class="row mb-3">
+    <div class="col-6 col-md-3 mb-3 mb-md-0">
+      <div class="hd-stat is-brand">
+        <div class="hd-stat__label">Arrivals today</div>
+        <div class="hd-stat__value">{{ $stats['arrivals'] ?? 0 }}</div>
+        <div class="hd-stat__sub">Pending check-in</div>
       </div>
     </div>
-    <div class="col-md-6 col-lg-3">
-      <div class="widget-small info coloured-icon">
-        <i class="icon fa fa-th-large fa-3x"></i>
-        <div class="info">
-          <h4>Active Modules</h4>
-          <p><b>{{ count($moduleCards) }}</b></p>
-        </div>
+    <div class="col-6 col-md-3 mb-3 mb-md-0">
+      <div class="hd-stat is-brand">
+        <div class="hd-stat__label">Departures today</div>
+        <div class="hd-stat__value">{{ $stats['departures'] ?? 0 }}</div>
+        <div class="hd-stat__sub">Checking out</div>
       </div>
     </div>
-    @if($hotel?->supportsMultiBranch())
-      <div class="col-md-6 col-lg-3">
-        <div class="widget-small warning coloured-icon">
-          <i class="icon fa fa-sitemap fa-3x"></i>
-          <div class="info">
-            <h4>Branches</h4>
-            <p><b>{{ $hotel->branches_count }}</b></p>
-          </div>
-        </div>
+    <div class="col-6 col-md-3 mb-3 mb-md-0">
+      <div class="hd-stat is-brand">
+        <div class="hd-stat__label">In house</div>
+        <div class="hd-stat__value">{{ $stats['in_house'] ?? 0 }}</div>
+        <div class="hd-stat__sub">Current guests</div>
       </div>
-      <div class="col-md-6 col-lg-3">
-        <div class="widget-small danger coloured-icon">
-          <i class="icon fa fa-plus-circle fa-3x"></i>
-          <div class="info">
-            <h4>Branch Limit</h4>
-            <p><b>{{ $hotel->maxBranches() === 0 ? 'Unlimited' : $hotel->maxBranches() }}</b></p>
-          </div>
-        </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="hd-stat is-brand">
+        <div class="hd-stat__label">Occupancy</div>
+        <div class="hd-stat__value">{{ $stats['occupancy_pct'] ?? 0 }}%</div>
+        <div class="hd-stat__sub">{{ $stats['occupied'] ?? 0 }} / {{ $stats['total_rooms'] ?? 0 }} rooms</div>
       </div>
-    @endif
+    </div>
   </div>
 
-  @if($hasChannelManager && $cmStatus)
-    <div class="row">
-      <div class="col-md-12">
-        @include('hotel.partials.dashboard-channel-manager')
-      </div>
-    </div>
-  @endif
-
-  @if($hasBookingEngine && $bookingEngine)
-    <div class="row">
-      <div class="col-md-12">
-        @include('hotel.partials.dashboard-booking-engine')
-      </div>
-    </div>
-  @endif
-
-  @if(count($gettingStartedSteps))
-    <div class="row">
-      <div class="col-md-12">
-        <div class="tile">
-          <h3 class="tile-title"><i class="fa fa-flag-checkered"></i> Where to start</h3>
-          <div class="tile-body">
-            <p class="text-muted mb-3">Follow these steps to set up your hotel account. You can also open any module from the sidebar or the cards below.</p>
-            @foreach($gettingStartedSteps as $step)
-              <div class="hotel-start-step">
-                <span class="hotel-start-step__num">{{ $step['step'] }}</span>
-                <div class="flex-grow-1">
-                  <h5 class="mb-1">{{ $step['title'] }}</h5>
-                  <p class="text-muted mb-2">{{ $step['description'] }}</p>
-                  @if($step['available'])
-                    <a class="btn btn-primary btn-sm" href="{{ $step['url'] }}">
-                      <i class="{{ $step['icon'] }}"></i> Start now
-                    </a>
-                  @else
-                    <span class="badge badge-secondary">Coming soon</span>
-                  @endif
-                </div>
-              </div>
-            @endforeach
-          </div>
-        </div>
-      </div>
-    </div>
-  @endif
-
-  @if($hotel?->supportsMultiBranch() && $hotel->branches_count === 0)
-    <div class="row">
-      <div class="col-md-12">
-        <div class="tile">
-          <div class="tile-title-w-btn">
-            <h3 class="tile-title"><i class="fa fa-sitemap"></i> Set up your first branch</h3>
-            <p>
-              @if($hotel->canAddBranch())
-                <a class="btn btn-primary icon-btn" href="{{ route('hotel.branches.create') }}">
-                  <i class="fa fa-plus"></i> Add Branch
-                </a>
-              @endif
-            </p>
-          </div>
-          <div class="tile-body">
-            <p>Your Enterprise plan supports multiple locations. Add your headquarters or first property to begin managing branches.</p>
-            <a class="btn btn-primary" href="{{ route('hotel.branches.index') }}">
-              <i class="fa fa-sitemap"></i> Go to Branches
-            </a>
-          </div>
-        </div>
-      </div>
-    </div>
-  @endif
-
   <div class="row">
-    <div class="col-md-12">
-      <div class="tile">
-        <h3 class="tile-title"><i class="fa fa-th"></i> Your modules</h3>
-        <div class="tile-body">
-          @if(count($moduleCards))
-            <div class="row">
-              @foreach($moduleCards as $module)
-                <div class="col-md-6 col-lg-4 mb-4">
-                  <div class="hotel-module-card">
-                    <div class="hotel-module-card__icon">
-                      <i class="{{ $module['icon'] }}"></i>
-                    </div>
-                    <h5 class="mb-2">{{ $module['label'] }}</h5>
-                    <p class="text-muted small mb-3">{{ $module['description'] }}</p>
-                    @if($module['available'])
-                      <a class="btn btn-primary btn-sm" href="{{ $module['url'] }}">
-                        <i class="fa fa-arrow-right"></i> Open module
-                      </a>
-                    @else
-                      <button type="button" class="btn btn-secondary btn-sm" disabled>
-                        Coming soon
-                      </button>
-                    @endif
-                  </div>
-                </div>
+    <div class="col-md-6 mb-4 mb-md-0">
+      <div class="hd-panel">
+        <div class="hd-panel__head">
+          <h3>Today's arrivals</h3>
+          <a href="{{ route('hotel.check-in.index') }}">Check-in →</a>
+        </div>
+        @if(count($arrivals))
+          <table class="hd-table">
+            <thead>
+              <tr>
+                <th>Guest</th>
+                <th>Room</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              @foreach($arrivals as $row)
+                <tr>
+                  <td><span class="hd-guest">{{ $row['guest'] }}</span></td>
+                  <td>{{ $row['room'] }}</td>
+                  <td>{{ $row['source'] }}</td>
+                </tr>
               @endforeach
-            </div>
-          @else
-            <p class="text-muted mb-0">No modules are enabled on your subscription plan. Contact the platform owner.</p>
-          @endif
+            </tbody>
+          </table>
+        @else
+          <div class="hd-empty">No arrivals for today.</div>
+        @endif
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="hd-panel">
+        <div class="hd-panel__head">
+          <h3>Today's departures</h3>
+          <a href="{{ route('hotel.check-out.index') }}">Check-out →</a>
         </div>
+        @if(count($departures))
+          <table class="hd-table">
+            <thead>
+              <tr>
+                <th>Guest</th>
+                <th>Room</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              @foreach($departures as $row)
+                <tr>
+                  <td><span class="hd-guest">{{ $row['guest'] }}</span></td>
+                  <td>{{ $row['room'] }}</td>
+                  <td>{{ $row['status'] }}</td>
+                </tr>
+              @endforeach
+            </tbody>
+          </table>
+        @else
+          <div class="hd-empty">No departures for today.</div>
+        @endif
       </div>
     </div>
   </div>
 
-  @if($hotel?->plan)
-    <div class="row">
-      <div class="col-md-12">
-        <div class="tile">
-          <h3 class="tile-title">Subscription details</h3>
-          <div class="tile-body">
-            <p class="mb-1"><strong>Plan:</strong> {{ $hotel->plan->name }} — {{ $hotel->plan->billingLabel() }}</p>
-            <p class="mb-1"><strong>Limits:</strong> {{ $hotel->plan->roomsLimitLabel() }}, {{ $hotel->plan->usersLimitLabel() }}, {{ $hotel->plan->branchesLimitLabel() }}</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  @endif
+  <div class="hd-quick">
+    <a href="{{ route('hotel.check-in.index') }}"><i class="fa fa-sign-in"></i> Check-in</a>
+    <a href="{{ route('hotel.check-out.index') }}"><i class="fa fa-sign-out"></i> Check-out</a>
+    <a href="{{ route('hotel.room-view') }}"><i class="fa fa-th-large"></i> Room view</a>
+    <a href="{{ route('hotel.channel-manager.live-bookings') }}"><i class="fa fa-columns"></i> Live bookings</a>
+    <a href="{{ route('hotel.reservations.index') }}"><i class="fa fa-calendar"></i> Reservations</a>
+  </div>
 @endsection
-
-@push('scripts')
-  <script>
-    (function () {
-      document.querySelectorAll('.js-copy-text').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var text = this.getAttribute('data-copy') || '';
-          if (!text) return;
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(function () {
-              if (typeof swal === 'function') swal('Copied', 'Link copied to clipboard.', 'success');
-            });
-          } else {
-            var input = document.createElement('input');
-            input.value = text;
-            document.body.appendChild(input);
-            input.select();
-            document.execCommand('copy');
-            document.body.removeChild(input);
-            if (typeof swal === 'function') swal('Copied', 'Link copied to clipboard.', 'success');
-          }
-        });
-      });
-    })();
-  </script>
-@endpush

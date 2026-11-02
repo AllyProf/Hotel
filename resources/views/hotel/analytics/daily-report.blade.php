@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', ($ui['parent_label'] ?? 'Analytics').' - '.($ui['title'] ?? 'Daily Report'))
+@section('title', ($ui['title'] ?? 'Daily Report'))
 
 @push('styles')
   <style>
@@ -21,23 +21,6 @@
       font-size: 22px;
       font-weight: 400;
       color: #333;
-    }
-
-    .dr-page-title span {
-      font-size: 18px;
-      color: #888;
-      font-weight: 400;
-    }
-
-    .dr-breadcrumb {
-      margin-left: auto;
-      font-size: 13px;
-      color: #888;
-    }
-
-    .dr-breadcrumb i {
-      color: #f0ad4e;
-      margin-right: 4px;
     }
 
     .dr-toolbar {
@@ -61,6 +44,12 @@
       min-height: 36px;
       font-size: 13px;
       min-width: 180px;
+    }
+
+    .dr-meta {
+      margin-left: auto;
+      font-size: 13px;
+      color: #666;
     }
 
     .dr-table-wrap {
@@ -90,10 +79,6 @@
       font-size: 13px;
     }
 
-    .dr-table thead th.dr-th-label {
-      background: #555;
-    }
-
     .dr-table thead th.dr-th-sub {
       background: #666;
       font-size: 12px;
@@ -121,11 +106,11 @@
       background: #f9f9f9;
     }
 
-    .dr-footnote {
-      margin-top: 10px;
-      font-size: 12px;
-      color: #888;
-      font-style: italic;
+    .dr-revenue-native {
+      font-size: 11px;
+      color: #777;
+      margin-top: 3px;
+      font-weight: 400;
     }
   </style>
 @endpush
@@ -133,18 +118,13 @@
 @section('content')
   <div class="tile">
     <div class="dr-page-title">
-      <h3>{{ $ui['parent_label'] ?? 'Analytics' }}</h3>
-      <span>{{ $ui['title'] ?? 'Daily Report' }}</span>
-      <div class="dr-breadcrumb">
-        <i class="fa fa-star"></i>
-        {{ $ui['parent_label'] ?? 'Analytics' }} &gt; {{ $ui['title'] ?? 'Daily Report' }}
-      </div>
+      <h3>{{ $ui['title'] ?? 'Daily Report' }}</h3>
     </div>
 
     <form method="GET" action="{{ route('hotel.analytics.daily-report') }}" id="drFilterForm">
       <div class="dr-toolbar">
         <div class="dr-field">
-          <label for="report_date">Select Date:</label>
+          <label for="report_date">Report Date</label>
           <input
             type="date"
             name="report_date"
@@ -153,6 +133,9 @@
             value="{{ $filters['report_date'] ?? now()->format('Y-m-d') }}"
           >
         </div>
+        <div class="dr-meta">
+          {{ $report['total_rooms'] ?? 0 }} sellable rooms &middot; Operating currency: {{ $report['currency'] ?? 'TZS' }}
+        </div>
       </div>
     </form>
 
@@ -160,66 +143,103 @@
       <table class="dr-table">
         <thead>
           <tr>
-            <th class="dr-th-label" style="width: 28%;">&nbsp;</th>
+            <th style="width: 28%;">&nbsp;</th>
             <th colspan="2">{{ $report['day_label'] ?? '' }}</th>
             <th colspan="2">{{ $report['period_label'] ?? '' }}</th>
           </tr>
         </thead>
         <tbody>
           <tr class="dr-section">
-            <td colspan="5">Last Night's Performance</td>
+            <td colspan="5">Daily Performance</td>
           </tr>
-          @foreach ($report['last_night'] ?? [] as $row)
+          @foreach ($report['performance'] ?? [] as $row)
             <tr>
               <td>{{ $row['label'] }}</td>
-              <td colspan="2">{{ $row['day'] }}</td>
-              <td colspan="2">{{ $row['period'] }}</td>
+              <td colspan="2">
+                {{ $row['day'] }}
+                @if(! empty($row['day_native']))
+                  <div class="dr-revenue-native">Original: {{ $row['day_native'] }}</div>
+                @endif
+              </td>
+              <td colspan="2">
+                {{ $row['period'] }}
+                @if(! empty($row['period_native']))
+                  <div class="dr-revenue-native">Original: {{ $row['period_native'] }}</div>
+                @endif
+              </td>
             </tr>
           @endforeach
 
           <tr class="dr-section">
-            <td colspan="5">Source of Business*</td>
+            <td colspan="5">Source of Business</td>
           </tr>
           <tr>
             <td>&nbsp;</td>
             <th class="dr-th-sub">Rooms</th>
-            <th class="dr-th-sub">{{ $report['currency'] ?? 'USD' }}</th>
+            <th class="dr-th-sub">Revenue</th>
             <th class="dr-th-sub">Rooms</th>
-            <th class="dr-th-sub">{{ $report['currency'] ?? 'USD' }}</th>
+            <th class="dr-th-sub">Revenue</th>
           </tr>
-          @foreach ($report['sources'] ?? [] as $row)
-            <tr @class(['dr-total' => ($row['label'] ?? '') === 'Total'])>
+          @forelse ($report['sources'] ?? [] as $row)
+            <tr @class(['dr-total' => ! empty($row['is_total']) || ($row['label'] ?? '') === 'Total'])>
               <td>{{ $row['label'] }}</td>
               <td>{{ $row['day_rooms'] }}</td>
-              <td>{{ $row['day_usd'] }}</td>
+              <td>
+                {{ $row['day_revenue'] }}
+                @if(! empty($row['day_revenue_native']))
+                  <div class="dr-revenue-native">Original: {{ $row['day_revenue_native'] }}</div>
+                @endif
+              </td>
               <td>{{ $row['period_rooms'] }}</td>
-              <td>{{ $row['period_usd'] }}</td>
+              <td>
+                {{ $row['period_revenue'] }}
+                @if(! empty($row['period_revenue_native']))
+                  <div class="dr-revenue-native">Original: {{ $row['period_revenue_native'] }}</div>
+                @endif
+              </td>
             </tr>
-          @endforeach
+          @empty
+            <tr>
+              <td colspan="5" class="text-muted">No occupied rooms for this date.</td>
+            </tr>
+          @endforelse
 
-          <tr class="dr-section">
-            <td colspan="5">Business Pick Up*</td>
-          </tr>
-          <tr>
-            <td>&nbsp;</td>
-            <th class="dr-th-sub">RNs</th>
-            <th class="dr-th-sub">{{ $report['currency'] ?? 'USD' }}</th>
-            <th class="dr-th-sub">RNs</th>
-            <th class="dr-th-sub">{{ $report['currency'] ?? 'USD' }}</th>
-          </tr>
-          @foreach ($report['pickup'] ?? [] as $row)
-            <tr @class(['dr-total' => ($row['label'] ?? '') === 'Total'])>
-              <td>{{ $row['label'] }}</td>
-              <td>{{ $row['day_rns'] }}</td>
-              <td>{{ $row['day_usd'] }}</td>
-              <td>{{ $row['period_rns'] }}</td>
-              <td>{{ $row['period_usd'] }}</td>
+          @if(! empty($report['services'] ?? []))
+            <tr class="dr-section">
+              <td colspan="5">PMS Services</td>
             </tr>
-          @endforeach
+            <tr>
+              <td>&nbsp;</td>
+              <th class="dr-th-sub">Transactions</th>
+              <th class="dr-th-sub">Revenue</th>
+              <th class="dr-th-sub">Transactions</th>
+              <th class="dr-th-sub">Revenue</th>
+            </tr>
+            @foreach ($report['services'] as $row)
+              <tr @class(['dr-total' => ! empty($row['is_total'])])>
+                <td>{{ $row['label'] }}</td>
+                <td>{{ $row['day_count'] }}</td>
+                <td>
+                  {{ $row['day_revenue'] }}
+                  @if(! empty($row['day_revenue_native']))
+                    <div class="dr-revenue-native">Original: {{ $row['day_revenue_native'] }}</div>
+                  @endif
+                </td>
+                <td>{{ $row['period_count'] }}</td>
+                <td>
+                  {{ $row['period_revenue'] }}
+                  @if(! empty($row['period_revenue_native']))
+                    <div class="dr-revenue-native">Original: {{ $row['period_revenue_native'] }}</div>
+                  @endif
+                </td>
+              </tr>
+            @endforeach
+          @endif
         </tbody>
       </table>
-
-      <p class="dr-footnote">* Sources that generate business for the day will feature in the report only</p>
+      @if(! empty($report['exchange_rate_note']))
+        <p class="text-muted small px-3 pb-3 mb-0">{{ $report['exchange_rate_note'] }}</p>
+      @endif
     </div>
   </div>
 @endsection

@@ -3,13 +3,16 @@
 namespace App\Http\Controllers\Hotel;
 
 use App\Http\Controllers\Controller;
+use App\Models\Hotel;
 use App\Models\HotelPmsCategory;
+use App\Models\HotelStoreCategory;
 use App\Models\HotelPmsService;
 use App\Models\HotelRatePlan;
 use App\Models\HotelRoom;
 use App\Services\ChannelManager\ChannelManagerPushService;
 use App\Services\HotelAmenityService;
 use App\Services\HotelSettingsService;
+use App\Services\Stores\StoreCategoryService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -23,6 +26,7 @@ class SettingsController extends Controller
         private HotelSettingsService $settingsService,
         private HotelAmenityService $amenityService,
         private ChannelManagerPushService $cmPush,
+        private StoreCategoryService $storeCategories,
     ) {}
 
     public function index(Request $request): View
@@ -47,8 +51,15 @@ class SettingsController extends Controller
         $beRoom = $hotel->rooms->firstWhere('id', $beRoomId) ?? $hotel->rooms->first();
         $beRateplan = $hotel->ratePlans->firstWhere('id', $beRateplanId) ?? $hotel->ratePlans->first();
 
+        $storeCategories = collect();
+        if ($tab === 'store-categories') {
+            $this->storeCategories->ensureDefaultCategories($hotel);
+            $this->storeCategories->cleanupItemCategoryLegacyData($hotel);
+            $storeCategories = $this->storeCategories->categoriesForHotel($hotel);
+        }
+
         return view('hotel.settings.index', compact(
-            'hotel', 'settings', 'tabs', 'tab', 'amenities', 'beRoom', 'beRateplan'
+            'hotel', 'settings', 'tabs', 'tab', 'amenities', 'beRoom', 'beRateplan', 'storeCategories'
         ));
     }
 
@@ -66,9 +77,15 @@ class SettingsController extends Controller
             'laundry' => $this->updateLaundry($request, $settings),
             'pms-services' => $this->updatePmsServices($request, $hotel),
             'pms-category' => $this->updatePmsCategories($request, $hotel),
+            'store-categories' => $this->updateStoreCategories($request, $hotel),
             'be' => $this->updateBe($request, $settings),
             'amenities' => $this->updateAmenities($request, $settings),
             'whatsapp' => $this->updateWhatsapp($request, $settings),
+            'hr' => $this->updateHr($request, $settings),
+            'bar' => $this->updateBar($request, $settings),
+            'hk_procurement' => $this->updateDepartmentProcurement($request, $settings, 'hk_procurement'),
+            'laundry_procurement' => $this->updateDepartmentProcurement($request, $settings, 'laundry_procurement'),
+            'reception_procurement' => $this->updateDepartmentProcurement($request, $settings, 'reception_procurement'),
             default => null,
         };
 
@@ -93,6 +110,15 @@ class SettingsController extends Controller
             if ($request->filled('rateplan_amenities_plan_id')) {
                 $redirectParams['be_rateplan_id'] = $request->input('rateplan_amenities_plan_id');
             }
+        }
+
+        if ($tab === 'be' && $request->input('redirect_to') === 'booking-engine') {
+            return redirect()
+                ->route('hotel.booking-engine.website-config', array_filter([
+                    'be_room_id' => $redirectParams['be_room_id'] ?? null,
+                    'be_rateplan_id' => $redirectParams['be_rateplan_id'] ?? null,
+                ]))
+                ->with($flashKey, $successMessage);
         }
 
         return redirect()
@@ -352,6 +378,29 @@ class SettingsController extends Controller
         }
     }
 
+    private function updateStoreCategories(Request $request, Hotel $hotel): void
+    {
+        foreach ($request->input('categories', []) as $cat) {
+            $name = trim((string) ($cat['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            if (! empty($cat['id'])) {
+                $model = HotelStoreCategory::query()
+                    ->where('hotel_id', $hotel->id)
+                    ->whereKey($cat['id'])
+                    ->firstOrFail();
+                $this->storeCategories->updateCategory($hotel, $model, $name);
+            } else {
+                try {
+                    $this->storeCategories->createCategory($hotel, $name);
+                } catch (\InvalidArgumentException) {
+                    // duplicate name — skip
+                }
+            }
+        }
+    }
+
     private function updateAmenities(Request $request, $settings): void
     {
         $validated = $request->validate([
@@ -458,6 +507,140 @@ class SettingsController extends Controller
         $whatsapp['checkin_reminder'] = $request->boolean('checkin_reminder');
         $whatsapp['checkout_reminder'] = $request->boolean('checkout_reminder');
         $settings->update(['whatsapp' => $whatsapp]);
+    }
+
+    private function updateHr(Request $request, $settings): void
+    {
+        $defaults = $this->settingsService->defaultHr();
+        $types = [];
+
+        foreach ($request->input('staff_document_types', []) as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $label = trim((string) ($row['label'] ?? ''));
+            $key = trim((string) ($row['key'] ?? ''));
+            if ($key === '' && $label !== '') {
+                $key = Str::slug($label, '_');
+            }
+            if ($key === '') {
+                continue;
+            }
+            $types[] = [
+                'key' => $key,
+                'label' => $label !== '' ? $label : Str::headline(str_replace('_', ' ', $key)),
+                'required' => ! empty($row['required']),
+                'enabled' => ! empty($row['enabled']),
+            ];
+        }
+
+        $hintsRaw = $request->input('email_domain_hints', '');
+        $hints = is_array($hintsRaw)
+            ? array_values(array_filter(array_map('trim', $hintsRaw)))
+            : array_values(array_filter(array_map('trim', preg_split('/[\s,;]+/', (string) $hintsRaw) ?: [])));
+
+        $settings->update([
+            'hr' => [
+                'min_password_length' => max(6, min(32, (int) $request->input('min_password_length', 8))),
+                'require_strong_password' => $request->boolean('require_strong_password'),
+                'email_domain_hints' => $hints,
+                'staff_document_types' => $types !== [] ? $types : $defaults['staff_document_types'],
+            ],
+        ]);
+    }
+
+    private function updateDepartmentProcurement(Request $request, $settings, string $settingsKey): void
+    {
+        $emailsRaw = $request->input('purchase_list_recipient_emails', '');
+        $emails = is_array($emailsRaw)
+            ? array_values(array_filter(array_map('trim', $emailsRaw)))
+            : array_values(array_filter(array_map('trim', preg_split('/[\s,;]+/', (string) $emailsRaw) ?: [])));
+
+        $staffIds = collect($request->input('purchase_list_recipient_staff_user_ids', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $accountantIds = collect($request->input('purchase_list_accountant_staff_user_ids', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $existing = is_array($settings->{$settingsKey})
+            ? $settings->{$settingsKey}
+            : $this->settingsService->defaultDepartmentProcurement();
+        $existingPl = is_array($existing['purchase_list'] ?? null) ? $existing['purchase_list'] : [];
+
+        $budgetCurrency = strtoupper(trim((string) $request->input('purchase_list_budget_currency', '')));
+        if ($budgetCurrency === '') {
+            $budgetCurrency = null;
+        }
+
+        $defaultVendorId = (int) $request->input('purchase_list_default_vendor_id', 0);
+        $defaultVendorId = $defaultVendorId > 0 ? $defaultVendorId : null;
+
+        $settings->update([
+            $settingsKey => array_merge($existing, [
+                'purchase_list' => array_merge($existingPl, [
+                    'recipient_emails' => $emails,
+                    'recipient_staff_user_ids' => $staffIds,
+                    'include_hotel_email' => $request->boolean('purchase_list_include_hotel_email'),
+                    'budget_currency' => $budgetCurrency,
+                    'accountant_staff_user_ids' => $accountantIds,
+                    'default_vendor_id' => $defaultVendorId,
+                ]),
+            ]),
+        ]);
+    }
+
+    private function updateBar(Request $request, $settings): void
+    {
+        $emailsRaw = $request->input('purchase_list_recipient_emails', '');
+        $emails = is_array($emailsRaw)
+            ? array_values(array_filter(array_map('trim', $emailsRaw)))
+            : array_values(array_filter(array_map('trim', preg_split('/[\s,;]+/', (string) $emailsRaw) ?: [])));
+
+        $staffIds = collect($request->input('purchase_list_recipient_staff_user_ids', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $accountantIds = collect($request->input('purchase_list_accountant_staff_user_ids', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $existingBar = is_array($settings->bar) ? $settings->bar : $this->settingsService->defaultBar();
+        $existingPl = is_array($existingBar['purchase_list'] ?? null) ? $existingBar['purchase_list'] : [];
+
+        $budgetCurrency = strtoupper(trim((string) $request->input('purchase_list_budget_currency', '')));
+        if ($budgetCurrency === '') {
+            $budgetCurrency = null;
+        }
+
+        $defaultVendorId = (int) $request->input('purchase_list_default_vendor_id', 0);
+        $defaultVendorId = $defaultVendorId > 0 ? $defaultVendorId : null;
+
+        $settings->update([
+            'bar' => array_merge($existingBar, [
+                'purchase_list' => array_merge($existingPl, [
+                    'recipient_emails' => $emails,
+                    'recipient_staff_user_ids' => $staffIds,
+                    'include_hotel_email' => $request->boolean('purchase_list_include_hotel_email'),
+                    'budget_currency' => $budgetCurrency,
+                    'accountant_staff_user_ids' => $accountantIds,
+                    'default_vendor_id' => $defaultVendorId,
+                ]),
+            ]),
+        ]);
     }
 
     public function connectWhatsapp(): RedirectResponse

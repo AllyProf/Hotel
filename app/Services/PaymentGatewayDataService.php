@@ -461,8 +461,9 @@ class PaymentGatewayDataService
         $token = Str::upper(Str::random(12));
         $link = url('/pay/'.$hotel->id.'/'.$token);
 
-        return HotelPaymentLink::query()->create([
+        $paymentLink = HotelPaymentLink::query()->create([
             'hotel_id' => $hotel->id,
+            'cm_reservation_id' => $data['cm_reservation_id'] ?? null,
             'email' => $data['email'],
             'phone' => $data['phone'] ?? null,
             'amount' => $data['amount'],
@@ -472,6 +473,29 @@ class PaymentGatewayDataService
             'status' => HotelPaymentLink::STATUS_PENDING,
             'sent_at' => now(),
         ]);
+
+        if (! empty($data['cm_reservation_id'])) {
+            $reservation = CmReservation::query()
+                ->where('hotel_id', $hotel->id)
+                ->find($data['cm_reservation_id']);
+
+            if ($reservation !== null) {
+                $payload = is_array($reservation->payload) ? $reservation->payload : [];
+                $payload['paymentLink'] = $link;
+                $payload['payment_link'] = $link;
+                $payload['payment_link_id'] = $paymentLink->id;
+                $payload['payment_link_sent_at'] = now()->toIso8601String();
+                $payload['payment_link_amount'] = round((float) $data['amount'], 2);
+
+                if (! empty($data['late_fee_amount'])) {
+                    $payload['payment_link_late_fee'] = round((float) $data['late_fee_amount'], 2);
+                }
+
+                $reservation->update(['payload' => $payload]);
+            }
+        }
+
+        return $paymentLink;
     }
 
     /** @param  array<string, mixed>  $filters */

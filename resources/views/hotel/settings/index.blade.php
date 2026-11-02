@@ -154,6 +154,33 @@
             @include('hotel.settings.partials.tab-pms-services')
           @elseif($tab === 'pms-category')
             @include('hotel.settings.partials.tab-pms-category')
+          @elseif($tab === 'store-categories')
+            @include('hotel.settings.partials.tab-store-categories')
+          @elseif($tab === 'hr')
+            @include('hotel.settings.partials.tab-hr')
+          @elseif($tab === 'bar')
+            @include('hotel.settings.partials.tab-bar')
+          @elseif($tab === 'hk_procurement')
+            @include('hotel.settings.partials.tab-procurement-settings', [
+              'procSettingsKey' => 'hk_procurement',
+              'procSettingsTab' => 'hk_procurement',
+              'procModuleLabel' => 'Housekeeping',
+              'procModuleHint' => 'Send purchase lists from <strong>ERP → Maintenance &amp; HK</strong> (Purchase lists tab).',
+            ])
+          @elseif($tab === 'laundry_procurement')
+            @include('hotel.settings.partials.tab-procurement-settings', [
+              'procSettingsKey' => 'laundry_procurement',
+              'procSettingsTab' => 'laundry_procurement',
+              'procModuleLabel' => 'Laundry',
+              'procModuleHint' => 'Send purchase lists from <strong>PMS → Laundry</strong> (Purchase lists tab).',
+            ])
+          @elseif($tab === 'reception_procurement')
+            @include('hotel.settings.partials.tab-procurement-settings', [
+              'procSettingsKey' => 'reception_procurement',
+              'procSettingsTab' => 'reception_procurement',
+              'procModuleLabel' => 'Reception',
+              'procModuleHint' => 'Send purchase lists from <strong>ERP → Reception</strong>.',
+            ])
           @elseif($tab === 'be')
             @include('hotel.settings.partials.tab-be')
           @elseif($tab === 'whatsapp')

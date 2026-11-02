@@ -85,8 +85,155 @@
       var planSelect = document.querySelector('.js-res-rate-plan');
       var unitSelect = document.querySelector('.js-res-room-unit');
       var dailyRate = document.querySelector('.js-res-daily-rate');
+      var dailyTax = document.querySelector('.js-res-daily-tax');
+      var taxInclusive = document.querySelector('.js-res-tax-inclusive');
+      var roomCountSelect = document.querySelector('.js-res-room-count');
       var guestTypeSelect = document.querySelector('.js-res-guest-type');
-      var currencyLabel = document.querySelector('.js-res-currency-label');
+      var currencyLabels = document.querySelectorAll('.js-res-currency-label');
+      var paymentMode = document.querySelector('.js-res-payment-mode');
+      var paymentProviderWrap = document.querySelector('.js-res-payment-provider-wrap');
+      var paymentProviderLabel = document.querySelector('.js-res-payment-provider-label');
+      var paymentProvider = document.querySelector('.js-res-payment-provider');
+      var pricingConfig = { vat_rate: 18 };
+      var paymentProviderConfig = { bank_providers: [], mobile_payment_providers: [] };
+      var oldPaymentProvider = '';
+
+      try {
+        var pricingEl = document.getElementById('res-pricing-config');
+        if (pricingEl) {
+          pricingConfig = JSON.parse(pricingEl.textContent);
+        }
+      } catch (e) {}
+
+      try {
+        var providerConfigEl = document.getElementById('res-payment-provider-config');
+        if (providerConfigEl) {
+          paymentProviderConfig = JSON.parse(providerConfigEl.textContent);
+        }
+      } catch (e) {}
+
+      try {
+        var oldProviderEl = document.getElementById('res-old-payment-provider');
+        if (oldProviderEl) {
+          oldPaymentProvider = JSON.parse(oldProviderEl.textContent) || '';
+        }
+      } catch (e) {}
+
+      function providerOptionsForMode(mode) {
+        var value = (mode || '').toLowerCase();
+
+        if (value.indexOf('bank') !== -1) {
+          return paymentProviderConfig.bank_providers || [];
+        }
+
+        if (/mobile|m-pesa|mpesa|wallet|tigo|airtel|halopesa|upi/.test(value)) {
+          return paymentProviderConfig.mobile_payment_providers || [];
+        }
+
+        return [];
+      }
+
+      function updatePaymentProviderField() {
+        if (!paymentMode || !paymentProviderWrap || !paymentProvider) {
+          return;
+        }
+
+        var options = providerOptionsForMode(paymentMode.value);
+        var modeValue = (paymentMode.value || '').toLowerCase();
+        var previous = paymentProvider.value || oldPaymentProvider;
+
+        paymentProvider.innerHTML = '<option value="">Select provider</option>';
+        options.forEach(function (name) {
+          var option = document.createElement('option');
+          option.value = name;
+          option.textContent = name;
+          if (previous && previous === name) {
+            option.selected = true;
+          }
+          paymentProvider.appendChild(option);
+        });
+
+        oldPaymentProvider = '';
+
+        var show = options.length > 0;
+        paymentProviderWrap.classList.toggle('d-none', !show);
+        paymentProvider.required = show;
+
+        if (paymentProviderLabel) {
+          var label = modeValue.indexOf('bank') !== -1 ? 'Bank' : 'Mobile Payment Provider';
+          paymentProviderLabel.innerHTML = label + (show ? ' <span class="text-danger">*</span>' : '');
+        }
+
+        if (!show) {
+          paymentProvider.value = '';
+        }
+      }
+
+      function formatMoney(value) {
+        var amount = Number(value || 0);
+        return amount.toLocaleString(undefined, {
+          minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
+          maximumFractionDigits: 2,
+        });
+      }
+
+      function calculateCharges() {
+        var rate = parseFloat(dailyRate && dailyRate.value ? dailyRate.value : '0') || 0;
+        var nights = parseInt(nightsInput && nightsInput.value ? nightsInput.value : '1', 10) || 1;
+        var rooms = parseInt(roomCountSelect && roomCountSelect.value ? roomCountSelect.value : '1', 10) || 1;
+        var inclusive = !!(taxInclusive && taxInclusive.checked);
+        var vatRate = Number(pricingConfig.vat_rate || 0);
+        var multiplier = Math.max(1, nights) * Math.max(1, rooms);
+        var taxPerNight = 0;
+        var netPerNight = rate;
+
+        if (inclusive) {
+          taxPerNight = vatRate > 0 ? Math.round((rate * (vatRate / (100 + vatRate))) * 100) / 100 : 0;
+          netPerNight = Math.round((rate - taxPerNight) * 100) / 100;
+        } else {
+          var manualTax = dailyTax && dailyTax.dataset.manualOverride === '1'
+            ? (parseFloat(dailyTax.value || '0') || 0)
+            : null;
+          taxPerNight = manualTax !== null
+            ? manualTax
+            : (vatRate > 0 ? Math.round((rate * vatRate / 100) * 100) / 100 : 0);
+          if (dailyTax && dailyTax.dataset.manualOverride !== '1') {
+            dailyTax.value = taxPerNight.toFixed(2);
+          }
+          netPerNight = rate;
+        }
+
+        if (dailyTax) {
+          dailyTax.readOnly = inclusive;
+          if (inclusive) {
+            dailyTax.value = taxPerNight.toFixed(2);
+          }
+        }
+
+        var totalNet = Math.round(netPerNight * multiplier * 100) / 100;
+        var totalVat = Math.round(taxPerNight * multiplier * 100) / 100;
+        var totalGross = Math.round((totalNet + totalVat) * 100) / 100;
+
+        document.querySelectorAll('.js-res-total-gross').forEach(function (el) {
+          el.textContent = formatMoney(totalGross);
+        });
+        document.querySelectorAll('.js-res-total-net').forEach(function (el) {
+          el.textContent = formatMoney(totalNet);
+        });
+        document.querySelectorAll('.js-res-total-vat').forEach(function (el) {
+          el.textContent = formatMoney(totalVat);
+        });
+        document.querySelectorAll('.js-res-vat-rate').forEach(function (el) {
+          el.textContent = Number(vatRate).toFixed(2);
+        });
+
+        var hint = document.querySelector('.js-res-daily-tax-hint');
+        if (hint) {
+          hint.textContent = inclusive
+            ? 'VAT portion of the inclusive nightly rate.'
+            : 'Auto from settings VAT rate. Edit to override.';
+        }
+      }
 
       function parseDate(value) {
         if (!value) return null;
@@ -181,9 +328,12 @@
         if (rate !== null && rate !== undefined && rate !== '') {
           dailyRate.value = rate;
         }
-        if (currencyLabel && currency) {
-          currencyLabel.textContent = currency;
-        }
+        currencyLabels.forEach(function (label) {
+          if (currency) {
+            label.textContent = currency;
+          }
+        });
+        calculateCharges();
       }
 
       window.resApplyGuestTypeRate = applyRateForGuestType;
@@ -196,11 +346,30 @@
         applyRateForGuestType();
       }
 
-      if (checkin) checkin.addEventListener('change', updateNights);
-      if (checkout) checkout.addEventListener('change', updateNights);
+      if (checkin) checkin.addEventListener('change', function () { updateNights(); calculateCharges(); });
+      if (checkout) checkout.addEventListener('change', function () { updateNights(); calculateCharges(); });
       if (roomSelect) roomSelect.addEventListener('change', syncRoomDependents);
       if (planSelect) planSelect.addEventListener('change', applyRateForGuestType);
       if (guestTypeSelect) guestTypeSelect.addEventListener('change', applyRateForGuestType);
+      if (dailyRate) dailyRate.addEventListener('input', calculateCharges);
+      if (roomCountSelect) roomCountSelect.addEventListener('change', calculateCharges);
+      if (taxInclusive) taxInclusive.addEventListener('change', function () {
+        if (dailyTax) {
+          dailyTax.dataset.manualOverride = '0';
+        }
+        calculateCharges();
+      });
+      if (dailyTax) {
+        dailyTax.addEventListener('input', function () {
+          if (!(taxInclusive && taxInclusive.checked)) {
+            dailyTax.dataset.manualOverride = '1';
+          }
+          calculateCharges();
+        });
+      }
+      if (paymentMode) {
+        paymentMode.addEventListener('change', updatePaymentProviderField);
+      }
 
       var photoInput = document.getElementById('photo_id');
       if (photoInput) {
@@ -215,7 +384,11 @@
       window.resCreateSyncRates = function () {
         syncRoomDependents();
         updateNights();
+        calculateCharges();
       };
+
+      calculateCharges();
+      updatePaymentProviderField();
 
       var createForm = document.getElementById('resCreateForm');
       if (createForm) {

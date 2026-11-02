@@ -43,6 +43,9 @@ class LiveBookingsController extends Controller
             'bookings' => $bookings,
             'bookingDetails' => $bookingDetails,
             'pollSignature' => $pollState['signature'],
+            'pollTotal' => $pollState['total'],
+            'pollIntervalSeconds' => (int) config('hotel_pms.live_bookings.poll_interval_seconds', 10),
+            'pollReloadDelayMs' => (int) config('hotel_pms.live_bookings.poll_reload_delay_ms', 1200),
             'webhookUrl' => config('app.url').'/webhooks/cm/reservations',
             'filters' => $filters,
         ]);

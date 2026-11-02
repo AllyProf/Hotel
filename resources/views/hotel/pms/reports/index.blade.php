@@ -161,6 +161,47 @@
       color: #555;
       background: #f3f4f6;
     }
+
+    .rp-field--month.is-hidden,
+    .rp-field--date-range.is-hidden,
+    .rp-toolbar-extra.is-hidden {
+      display: none;
+    }
+
+    .rp-pl-table thead th:first-child {
+      min-width: 220px;
+    }
+
+    .rp-pl-table tbody td:first-child {
+      font-weight: 500;
+    }
+
+    .rp-pl-table tbody td.rp-pl-num {
+      text-align: right;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .rp-pl-table tr.rp-pl-section td {
+      background: #e9ecef !important;
+      font-weight: 700;
+    }
+
+    .rp-pl-table tr.rp-pl-subtotal td {
+      background: #d6d8db !important;
+      font-weight: 700;
+    }
+
+    .rp-pl-table tr.rp-pl-profit td {
+      background: #e9ecef !important;
+      font-weight: 700;
+    }
+
+    .rp-pl-table tr.rp-pl-section:hover td,
+    .rp-pl-table tr.rp-pl-subtotal:hover td,
+    .rp-pl-table tr.rp-pl-profit:hover td {
+      background: inherit !important;
+    }
   </style>
 @endpush
 
@@ -203,12 +244,24 @@
               </select>
             </div>
 
-            <div class="rp-field rp-field--date">
+            <div class="rp-field rp-field--month {{ ($filters['report'] ?? '') === 'monthly_pl' ? '' : 'is-hidden' }}" id="rpMonthRangeWrap">
+              <label for="from_month">From Month:</label>
+              <input type="month" class="form-control" id="from_month" name="from_month"
+                value="{{ $filters['from_month'] ?? now()->subMonths(5)->format('Y-m') }}">
+            </div>
+
+            <div class="rp-field rp-field--month {{ ($filters['report'] ?? '') === 'monthly_pl' ? '' : 'is-hidden' }}" id="rpMonthRangeWrapTo">
+              <label for="to_month">To Month:</label>
+              <input type="month" class="form-control" id="to_month" name="to_month"
+                value="{{ $filters['to_month'] ?? now()->format('Y-m') }}">
+            </div>
+
+            <div class="rp-field rp-field--date rp-field--date-range {{ ($filters['report'] ?? '') === 'monthly_pl' ? 'is-hidden' : '' }}" id="rpDateRangeWrap">
               <label for="from_date">From Date:</label>
               <input type="date" class="form-control" id="from_date" name="from_date" value="{{ $filters['from_date'] }}">
             </div>
 
-            <div class="rp-field rp-field--date">
+            <div class="rp-field rp-field--date rp-field--date-range {{ ($filters['report'] ?? '') === 'monthly_pl' ? 'is-hidden' : '' }}" id="rpDateRangeWrapTo">
               <label for="to_date">To Date:</label>
               <input type="date" class="form-control" id="to_date" name="to_date" value="{{ $filters['to_date'] }}">
             </div>
@@ -218,7 +271,7 @@
               <button type="submit" class="btn btn-rp">Submit</button>
             </div>
 
-            <div class="rp-field rp-field--filter-by">
+            <div class="rp-field rp-field--filter-by rp-toolbar-extra {{ ($filters['report'] ?? '') === 'monthly_pl' ? 'is-hidden' : '' }}" id="rpExtraFilters">
               <label for="filter_by">Filter By:</label>
               <select class="form-control js-rp-filter-by" id="filter_by" name="filter_by">
                 <option value="" {{ $filters['filter_by'] === '' ? 'selected' : '' }}>All</option>
@@ -230,14 +283,14 @@
               </select>
             </div>
 
-            <div class="rp-field rp-field--filter-value {{ $filters['filter_by'] === '' ? 'is-hidden' : '' }}" id="rpFilterValueWrap">
+            <div class="rp-field rp-field--filter-value rp-toolbar-extra {{ ($filters['report'] ?? '') === 'monthly_pl' ? 'is-hidden' : ($filters['filter_by'] === '' ? 'is-hidden' : '') }}" id="rpFilterValueWrap">
               <label for="filter_value" class="js-rp-filter-value-label">Value</label>
               <select class="form-control js-rp-filter-value" id="filter_value" name="filter_value">
                 <option value="">All</option>
               </select>
             </div>
 
-            <div class="rp-field rp-field--guest">
+            <div class="rp-field rp-field--guest rp-toolbar-extra {{ ($filters['report'] ?? '') === 'monthly_pl' ? 'is-hidden' : '' }}">
               <label for="guest_search">Search Guest:</label>
               <input type="search" class="form-control" id="guest_search" name="guest_search"
                 value="{{ $filters['guest_search'] }}" placeholder="Enter Guest Name">
@@ -257,9 +310,92 @@
           @if(! $submitted)
             <div class="rp-empty">Select a report and click Submit to view data.</div>
           @elseif(! ($result['available'] ?? false))
-            <div class="rp-empty">Report Not Available !!!</div>
+            <div class="rp-empty">This report is not available yet. It requires additional modules or data that are not configured for your property.</div>
           @else
-            <div class="rp-report-title">{{ $result['title'] }}</div>
+            <div class="rp-report-title">
+              {{ $result['title'] }}
+              @if(empty($result['summary']['monthly_pl']))
+                <span class="text-muted" style="font-size:13px;font-weight:500;">· {{ count($result['rows']) }} {{ Str::plural('record', count($result['rows'])) }}</span>
+              @endif
+            </div>
+
+            @if(! empty($result['summary']['monthly_pl']))
+              @php
+                $pl = $result['summary']['monthly_pl'];
+                $plColumns = $pl['columns'] ?? [];
+                $plMonthKeys = $pl['month_keys'] ?? [];
+                $plMonthLabels = array_slice($plColumns, 1, max(0, count($plColumns) - 2));
+              @endphp
+              <div class="rp-table-wrap">
+                <table class="rp-table rp-pl-table">
+                  <thead>
+                    <tr>
+                      @foreach($plColumns as $column)
+                        <th>{{ $column === '' ? ' ' : $column }}</th>
+                      @endforeach
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @foreach($pl['sections'] ?? [] as $section)
+                      @php
+                        $kind = $section['kind'] ?? 'data';
+                        $rowClass = match ($kind) {
+                          'section_title' => 'rp-pl-section',
+                          'subtotal' => 'rp-pl-subtotal',
+                          'profit' => 'rp-pl-profit',
+                          default => '',
+                        };
+                        $values = $section['values'] ?? [];
+                        $rowTotal = $values !== [] ? array_sum($values) : 0;
+                      @endphp
+                      <tr class="{{ $rowClass }}">
+                        <td>{{ $section['label'] ?? '' }}</td>
+                        @if($kind === 'section_title')
+                          @foreach($plMonthLabels as $monthLabel)
+                            <td class="rp-pl-num"></td>
+                          @endforeach
+                          <td class="rp-pl-num"></td>
+                        @else
+                          @foreach($plMonthKeys as $monthKey)
+                            <td class="rp-pl-num">{{ number_format($values[$monthKey] ?? 0, 0, '.', ',') }}</td>
+                          @endforeach
+                          <td class="rp-pl-num">{{ number_format($rowTotal, 0, '.', ',') }}</td>
+                        @endif
+                      </tr>
+                    @endforeach
+                  </tbody>
+                </table>
+              </div>
+            @elseif(! empty($result['summary']['revenue_totals']))
+              <div class="row mb-4">
+                @foreach($result['summary']['revenue_totals'] as $block)
+                  @php
+                    $colClass = count($result['summary']['revenue_totals']) > 1 ? 'col-lg-6' : 'col-12';
+                  @endphp
+                  <div class="{{ $colClass }} mb-3 mb-lg-0">
+                    <div class="table-responsive">
+                      <table class="table table-hover table-bordered mb-0">
+                        <thead class="thead-light">
+                          <tr>
+                            <th colspan="2">{{ $block['currency'] }} revenue totals</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @foreach($block['items'] ?? [] as $item)
+                            <tr>
+                              <th scope="row" class="text-muted font-weight-normal" style="width:42%">{{ $item['label'] ?? '' }}</th>
+                              <td class="font-weight-bold">{{ $item['value'] ?? '—' }}</td>
+                            </tr>
+                          @endforeach
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                @endforeach
+              </div>
+            @endif
+
+            @if(empty($result['summary']['monthly_pl']))
             <div class="rp-table-wrap">
               <table class="rp-table">
                 <thead>
@@ -286,6 +422,7 @@
                 </tbody>
               </table>
             </div>
+            @endif
           @endif
         </div>
       </div>
@@ -374,6 +511,18 @@
 
         populateFilterValue(currentFilterBy, currentFilterValue);
         syncFilterValueField();
+
+        var $report = $('#report');
+
+        function syncMonthlyPlToolbar() {
+          var isPl = $report.val() === 'monthly_pl';
+          $('#rpMonthRangeWrap, #rpMonthRangeWrapTo').toggleClass('is-hidden', !isPl);
+          $('#rpDateRangeWrap, #rpDateRangeWrapTo').toggleClass('is-hidden', isPl);
+          $('.rp-toolbar-extra').toggleClass('is-hidden', isPl);
+        }
+
+        $report.on('change select2:select', syncMonthlyPlToolbar);
+        syncMonthlyPlToolbar();
       });
     })();
   </script>

@@ -5,7 +5,8 @@ return [
 
     'tabs' => [
         'receivables' => 'Receivables',
-        'payables' => 'payables',
+        'payables' => 'Payables',
+        'bar_budgets' => 'Purchase budgets',
         'taxes' => 'Taxes',
         'reconciliation' => 'Reconciliation',
     ],
@@ -16,7 +17,9 @@ return [
             ['key' => 'contact_person', 'label' => 'Contact Person'],
             ['key' => 'gst_vat', 'label' => 'GST No.'],
             ['key' => 'total_billed', 'label' => 'Total Billed'],
-            ['key' => 'total_outstanding', 'label' => 'Outstanding'],
+            ['key' => 'collected', 'label' => 'Collected'],
+            ['key' => 'total_outstanding', 'label' => 'Outstanding (AR)'],
+            ['key' => 'bookings', 'label' => 'Company bookings'],
         ],
     ],
 
@@ -28,13 +31,14 @@ return [
             ['key' => 'pre_tax', 'label' => 'Pre tax'],
             ['key' => 'tax', 'label' => 'Tax'],
             ['key' => 'total', 'label' => 'Total'],
+            ['key' => 'status', 'label' => 'Status'],
+            ['key' => 'actions', 'label' => 'Actions'],
         ],
         'vendor_columns' => [
             ['key' => 'name', 'label' => 'Vendor Name'],
             ['key' => 'contact_person', 'label' => 'Contact Person'],
-            ['key' => 'gst_num', 'label' => 'GST Num'],
             ['key' => 'phone', 'label' => 'Phone'],
-            ['key' => 'state', 'label' => 'State'],
+            ['key' => 'state', 'label' => 'Region'],
         ],
     ],
 

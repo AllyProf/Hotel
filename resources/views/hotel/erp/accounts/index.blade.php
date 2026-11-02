@@ -34,6 +34,14 @@
       border-bottom-color: var(--ac-brand);
       background: #f8f9fa;
     }
+    .ac-tab .badge {
+      font-size: 11px;
+      font-weight: 700;
+      vertical-align: middle;
+    }
+    .ac-bar-budgets {
+      padding-top: 20px;
+    }
     .ac-toolbar {
       display: flex;
       flex-wrap: wrap;
@@ -66,12 +74,12 @@
     .ac-content { padding: 0 20px 24px; min-height: 200px; }
     .ac-empty { font-size: 15px; font-weight: 600; color: #333; padding: 12px 0; }
     .ac-table thead th {
-      background: #343a40;
+      background: var(--ac-brand);
       color: #fff;
       font-size: 13px;
       font-weight: 600;
       padding: 10px 12px;
-      border-color: #2d3238;
+      border-color: var(--ac-brand-dark);
       white-space: nowrap;
     }
     .ac-table tbody td {
@@ -132,10 +140,22 @@
       <div class="tile ac-page">
         <h3 class="ac-title">{{ $ui['title'] ?? 'Accounts' }}</h3>
 
+        @if(session('success'))
+          <div class="alert alert-success mx-3 mt-3 mb-0">{{ session('success') }}</div>
+        @endif
+        @if(session('warning'))
+          <div class="alert alert-warning mx-3 mt-3 mb-0">{{ session('warning') }}</div>
+        @endif
+
         <nav class="ac-tabs">
           @foreach($ui['tabs'] ?? [] as $key => $label)
             <a href="{{ route('hotel.accounts.index', array_merge(request()->except('page'), ['tab' => $key])) }}"
-              class="ac-tab {{ $filters['tab'] === $key ? 'is-active' : '' }}">{{ $label }}</a>
+              class="ac-tab {{ $filters['tab'] === $key ? 'is-active' : '' }}">
+              {{ $label }}
+              @if($key === 'bar_budgets' && (int) ($accountsTabBadges['bar_budgets'] ?? 0) > 0)
+                <span class="badge badge-warning ml-1">{{ $accountsTabBadges['bar_budgets'] }}</span>
+              @endif
+            </a>
           @endforeach
         </nav>
 
@@ -143,6 +163,8 @@
           @include('hotel.erp.accounts.partials.receivables')
         @elseif($filters['tab'] === 'payables')
           @include('hotel.erp.accounts.partials.payables')
+        @elseif($filters['tab'] === 'bar_budgets')
+          @include('hotel.erp.accounts.partials.bar-budgets')
         @elseif($filters['tab'] === 'taxes')
           @include('hotel.erp.accounts.partials.taxes')
         @else

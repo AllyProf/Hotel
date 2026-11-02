@@ -270,6 +270,61 @@
       color: #991b1b;
     }
 
+    .rd-table tbody tr.is-arrival-today td {
+      background: #ecfdf5;
+    }
+
+    .rd-table tbody tr.is-arrival-today td:first-child {
+      box-shadow: inset 3px 0 0 #059669;
+    }
+
+    .rd-table tbody tr.is-checkout-today td {
+      background: #fff7ed;
+    }
+
+    .rd-table tbody tr.is-checkout-today td:first-child {
+      box-shadow: inset 3px 0 0 #ea580c;
+    }
+
+    .rd-table tbody tr.is-arrival-today.is-checkout-today td {
+      background: linear-gradient(90deg, #ecfdf5 0%, #fff7ed 100%);
+    }
+
+    .rd-day-tag {
+      display: inline-block;
+      margin-left: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 999px;
+      vertical-align: middle;
+    }
+
+    .rd-day-tag.is-arrival { background: #d1fae5; color: #047857; }
+    .rd-day-tag.is-checkout { background: #ffedd5; color: #c2410c; }
+
+    .rd-quick-filter {
+      display: inline-flex;
+      align-items: center;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+      background: #fff;
+      color: #444;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .rd-quick-filter:hover,
+    .rd-quick-filter.is-active {
+      background: var(--rd-brand-soft);
+      border-color: var(--rd-brand);
+      color: var(--rd-brand);
+      text-decoration: none;
+    }
+
     .rd-booking-id {
       font-size: 12px;
       font-weight: 600;
@@ -514,6 +569,20 @@
                 <label>&nbsp;</label>
                 <button type="submit" class="btn btn-sm btn-rd-primary d-block">Submit</button>
               </div>
+              <div>
+                <label>&nbsp;</label>
+                <div class="d-flex" style="gap:6px;">
+                  @php
+                    $today = now()->format('Y-m-d');
+                    $isArrivalToday = $filters['filter_by'] === 'checkin' && $filters['from_date'] === $today && $filters['to_date'] === $today;
+                    $isCheckoutToday = $filters['filter_by'] === 'checkout' && $filters['from_date'] === $today && $filters['to_date'] === $today;
+                  @endphp
+                  <a href="{{ route('hotel.reservations.index', ['filter_by' => 'checkin', 'from_date' => $today, 'to_date' => $today, 'per_page' => $filters['per_page']]) }}"
+                    class="rd-quick-filter {{ $isArrivalToday ? 'is-active' : '' }}">Arrival Today</a>
+                  <a href="{{ route('hotel.reservations.index', ['filter_by' => 'checkout', 'from_date' => $today, 'to_date' => $today, 'per_page' => $filters['per_page']]) }}"
+                    class="rd-quick-filter {{ $isCheckoutToday ? 'is-active' : '' }}">Checkout Today</a>
+                </div>
+              </div>
             </div>
 
             <div class="rd-toolbar-actions">
@@ -561,12 +630,22 @@
             </thead>
             <tbody>
               @forelse($bookings as $booking)
-                <tr class="{{ $booking->isCancelled() ? 'is-cancelled' : '' }}">
+                <tr class="{{ $booking->rowHighlightClass() }}">
                   <td><span class="rd-booking-id">{{ $booking->booking_id }}</span></td>
                   <td><strong>{{ $booking->guestName() }}</strong></td>
                   <td>{{ $booking->bookedOnLabel() }}</td>
-                  <td>{{ $booking->checkinLabel() }}</td>
-                  <td>{{ $booking->checkoutLabel() }}</td>
+                  <td>
+                    {{ $booking->checkinLabel() }}
+                    @if($booking->isArrivalToday())
+                      <span class="rd-day-tag is-arrival">Arrival</span>
+                    @endif
+                  </td>
+                  <td>
+                    {{ $booking->checkoutLabel() }}
+                    @if($booking->isCheckoutToday())
+                      <span class="rd-day-tag is-checkout">Checkout</span>
+                    @endif
+                  </td>
                   <td>
                     @if($booking->sourceDisplayLabel() === '—')
                       —
@@ -600,11 +679,9 @@
                     </span>
                   </td>
                   <td>
-                    <button type="button" class="btn btn-sm btn-outline-secondary btn-rd-view js-rd-view"
-                      data-booking-id="{{ $booking->booking_id }}"
-                      data-record-id="{{ $booking->id }}">
+                    <a href="{{ route('hotel.reservations.show', $booking) }}" class="btn btn-sm btn-outline-secondary btn-rd-view">
                       View
-                    </button>
+                    </a>
                   </td>
                 </tr>
               @empty
@@ -659,62 +736,11 @@
     </div>
   </div>
 
-  <div class="modal fade" id="rdDetailModal" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog modal-lg" role="document">
-      <div class="modal-content">
-        <div class="modal-header" style="background:#940000;color:#fff;">
-          <h5 class="modal-title">Booking <span id="rdModalBookingId"></span></h5>
-          <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close">
-            <span aria-hidden="true">&times;</span>
-          </button>
-        </div>
-        <div class="modal-body">
-          <div id="rdModalSummary"></div>
-          <details class="mt-3">
-            <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#940000;">Raw payload</summary>
-            <pre class="rd-modal-pre" id="rdModalPayload"></pre>
-          </details>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-        </div>
-      </div>
-    </div>
-  </div>
 @endsection
 
 @push('scripts')
-  <script type="application/json" id="rd-bookings-data">@json($bookingDetails)</script>
   <script>
     (function () {
-      var details = {};
-      try {
-        details = JSON.parse(document.getElementById('rd-bookings-data').textContent || '{}');
-      } catch (e) {
-        details = {};
-      }
-
-      function renderSummary(summary) {
-        var html = '<table class="rd-detail-table"><tbody>';
-        Object.keys(summary || {}).forEach(function (key) {
-          html += '<tr><th>' + key + '</th><td>' + String(summary[key]) + '</td></tr>';
-        });
-        html += '</tbody></table>';
-        return html;
-      }
-
-      document.querySelectorAll('.js-rd-view').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var recordId = btn.getAttribute('data-record-id');
-          var detail = details[recordId] || { summary: {}, raw: {} };
-
-          document.getElementById('rdModalBookingId').textContent = btn.getAttribute('data-booking-id') || '';
-          document.getElementById('rdModalSummary').innerHTML = renderSummary(detail.summary || {});
-          document.getElementById('rdModalPayload').textContent = JSON.stringify(detail.raw || {}, null, 2);
-          $('#rdDetailModal').modal('show');
-        });
-      });
-
       var syncForm = document.getElementById('rdSyncForm');
       if (syncForm) {
         syncForm.addEventListener('submit', function () {

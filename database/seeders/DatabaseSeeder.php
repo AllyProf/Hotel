@@ -20,5 +20,7 @@ class DatabaseSeeder extends Seeder
                 'hotel_id' => null,
             ]
         );
+
+        $this->call(FrontDeskDemoSeeder::class);
     }
 }

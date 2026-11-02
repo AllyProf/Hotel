@@ -56,7 +56,24 @@ class ReservationInventoryService
         $this->pushInventoryForReservations($hotel, null, $reservation);
     }
 
-    private function consumeReservation(Hotel $hotel, CmReservation $reservation): void
+    public function pushInventoryForReservationChange(Hotel $hotel, CmReservation $before, CmReservation $after): void
+    {
+        $this->pushInventoryForReservations($hotel, $before, $after);
+    }
+
+    public function restoreReservation(Hotel $hotel, CmReservation $reservation): void
+    {
+        foreach ($this->nightlyAllocations($hotel, $reservation) as $allocation) {
+            $this->adjustAvailableCount(
+                $hotel,
+                $allocation['room_id'],
+                $allocation['date'],
+                $allocation['rooms']
+            );
+        }
+    }
+
+    public function consumeReservation(Hotel $hotel, CmReservation $reservation): void
     {
         foreach ($this->nightlyAllocations($hotel, $reservation) as $allocation) {
             $this->adjustAvailableCount(
@@ -68,16 +85,10 @@ class ReservationInventoryService
         }
     }
 
-    private function restoreReservation(Hotel $hotel, CmReservation $reservation): void
+    /** @return list<array{room_id: int, date: string, rooms: int}> */
+    public function nightlyAllocationsFor(Hotel $hotel, CmReservation $reservation): array
     {
-        foreach ($this->nightlyAllocations($hotel, $reservation) as $allocation) {
-            $this->adjustAvailableCount(
-                $hotel,
-                $allocation['room_id'],
-                $allocation['date'],
-                $allocation['rooms']
-            );
-        }
+        return $this->nightlyAllocations($hotel, $reservation);
     }
 
     /** @return list<array{room_id: int, date: string, rooms: int}> */

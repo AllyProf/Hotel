@@ -62,6 +62,9 @@ class HotelCompany extends Model
             'email' => $this->email ?: '—',
             'gst_vat' => $this->gst_vat ?: '—',
             'contracted_rates' => $this->contractedRatesSummary(),
+            'contracted_rates_map' => is_array($this->contracted_rates) ? $this->contracted_rates : [],
+            'contact_person' => $this->contact_person ?: '',
+            'phone' => $this->phone ?: '',
         ];
     }
 }

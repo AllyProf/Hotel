@@ -2,10 +2,11 @@
   $be = $settings->be ?? [];
   $selectedRoom = $beRoom ?? $hotel->rooms->first();
   $selectedPlan = $beRateplan ?? $hotel->ratePlans->first();
+  $bePickerRoute = $beSettingsRoute ?? 'hotel.settings.index';
 @endphp
 
 @if($hotel->rooms->isNotEmpty())
-  <form method="GET" action="{{ route('hotel.settings.index') }}" class="form-inline mb-3" id="beRoomPickerForm">
+  <form method="GET" action="{{ route($bePickerRoute) }}" class="form-inline mb-3" id="beRoomPickerForm">
     <input type="hidden" name="tab" value="be">
     @if($selectedPlan)
       <input type="hidden" name="be_rateplan_id" value="{{ $selectedPlan->id }}">
@@ -20,7 +21,7 @@
 @endif
 
 @if($hotel->ratePlans->isNotEmpty())
-  <form method="GET" action="{{ route('hotel.settings.index') }}" class="form-inline mb-4" id="beRateplanPickerForm">
+  <form method="GET" action="{{ route($bePickerRoute) }}" class="form-inline mb-4" id="beRateplanPickerForm">
     <input type="hidden" name="tab" value="be">
     @if($selectedRoom)
       <input type="hidden" name="be_room_id" value="{{ $selectedRoom->id }}">
@@ -38,6 +39,9 @@
   @csrf
   @method('PUT')
   <input type="hidden" name="tab" value="be">
+  @if(!empty($beFormRedirectTo))
+    <input type="hidden" name="redirect_to" value="{{ $beFormRedirectTo }}">
+  @endif
 
   <h4 class="settings-section-title">Room Types</h4>
   @foreach($hotel->rooms as $room)

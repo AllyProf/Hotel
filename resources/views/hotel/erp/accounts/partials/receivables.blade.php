@@ -25,7 +25,23 @@
               <td>{{ $company->contact_person ?: '—' }}</td>
               <td>{{ $company->gst_vat ?: '—' }}</td>
               <td>{{ $stats ? $companyData->moneyLabel($stats['billed'], $stats['currency']) : '—' }}</td>
-              <td>{{ $stats ? $companyData->moneyLabel($stats['outstanding'], $stats['currency']) : '—' }}</td>
+              <td>{{ $stats ? $companyData->moneyLabel($stats['payments'], $stats['currency']) : '—' }}</td>
+              <td>
+                @if($stats && ($stats['outstanding'] ?? 0) > 0)
+                  <strong>{{ $companyData->moneyLabel($stats['outstanding'], $stats['currency']) }}</strong>
+                @elseif($stats)
+                  {{ $companyData->moneyLabel(0, $stats['currency']) }}
+                @else
+                  —
+                @endif
+              </td>
+              <td>
+                @if($stats && ($stats['invoices'] ?? 0) > 0)
+                  <a href="{{ route('hotel.reservations.index') }}?search={{ urlencode($company->name) }}">{{ $stats['invoices'] }} booking(s)</a>
+                @else
+                  —
+                @endif
+              </td>
             </tr>
           @endforeach
         </tbody>

@@ -19,7 +19,7 @@
       <div class="tile">
         <h3 class="tile-title">Staff Details</h3>
         <div class="tile-body">
-          <form action="{{ route('hotel.staff.update', $staff) }}" method="POST">
+          <form action="{{ route('hotel.staff.update', $staff) }}" method="POST" enctype="multipart/form-data">
             @csrf
             @method('PUT')
             @include('hotel.staff.partials._form-fields', ['staff' => $staff, 'isEdit' => true])
@@ -33,3 +33,5 @@
     </div>
   </div>
 @endsection
+
+@include('hotel.staff.partials._staff-form-scripts')

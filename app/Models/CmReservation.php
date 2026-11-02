@@ -14,6 +14,14 @@ class CmReservation extends Model
 
     public const STATUS_CANCELLED = 'cancelled';
 
+    public const PMS_RESERVED = 'reserved';
+
+    public const PMS_ASSIGNED = 'assigned';
+
+    public const PMS_CHECKED_IN = 'checked_in';
+
+    public const PMS_CHECKED_OUT = 'checked_out';
+
     protected $fillable = [
         'hotel_id',
         'hotel_code',
@@ -21,11 +29,17 @@ class CmReservation extends Model
         'channel',
         'action',
         'status',
+        'pms_status',
+        'room_unit_id',
+        'checked_in_at',
+        'checked_out_at',
+        'late_checkout_fee',
         'checkin',
         'checkout',
         'guest_first_name',
         'guest_last_name',
         'amount_after_tax',
+        'amount_paid',
         'amount_before_tax',
         'tax',
         'currency',
@@ -38,7 +52,11 @@ class CmReservation extends Model
         return [
             'checkin' => 'date',
             'checkout' => 'date',
+            'checked_in_at' => 'datetime',
+            'checked_out_at' => 'datetime',
+            'late_checkout_fee' => 'decimal:2',
             'amount_after_tax' => 'decimal:2',
+            'amount_paid' => 'decimal:2',
             'amount_before_tax' => 'decimal:2',
             'tax' => 'decimal:2',
             'rooms' => 'array',
@@ -51,14 +69,207 @@ class CmReservation extends Model
         return $this->belongsTo(Hotel::class);
     }
 
+    public function roomUnit(): BelongsTo
+    {
+        return $this->belongsTo(HotelRoomUnit::class, 'room_unit_id');
+    }
+
+    public function isCheckedIn(): bool
+    {
+        return $this->pms_status === self::PMS_CHECKED_IN;
+    }
+
+    public function isCheckedOut(): bool
+    {
+        return $this->pms_status === self::PMS_CHECKED_OUT;
+    }
+
+    public function isMultiRoomBooking(): bool
+    {
+        return $this->roomCount() > 1;
+    }
+
+    /** @return list<int> */
+    public function assignedRoomUnitIds(): array
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+        $ids = $payload['room_unit_ids'] ?? [];
+
+        if (! is_array($ids)) {
+            $ids = [];
+        }
+
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+
+        if ($ids === [] && $this->room_unit_id) {
+            return [(int) $this->room_unit_id];
+        }
+
+        return $ids;
+    }
+
+    public function assignedRoomCount(): int
+    {
+        return count($this->assignedRoomUnitIds());
+    }
+
+    public function isRoomAssigned(): bool
+    {
+        return $this->assignedRoomCount() > 0;
+    }
+
+    public function isFullyAssigned(): bool
+    {
+        $required = max(1, $this->roomCount());
+
+        return $this->assignedRoomCount() >= $required;
+    }
+
+    public function assignedRoomLabel(): string
+    {
+        $ids = $this->assignedRoomUnitIds();
+
+        if ($ids === []) {
+            return '—';
+        }
+
+        $labels = HotelRoomUnit::query()
+            ->whereIn('id', $ids)
+            ->orderBy('room_number')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (HotelRoomUnit $unit) => $unit->displayLabel())
+            ->all();
+
+        return $labels !== [] ? implode(', ', $labels) : '—';
+    }
+
+    public function pmsStatusLabel(): string
+    {
+        return match ($this->pms_status) {
+            self::PMS_ASSIGNED => 'Assigned',
+            self::PMS_CHECKED_IN => 'Checked in',
+            self::PMS_CHECKED_OUT => 'Checked out',
+            default => 'Reserved',
+        };
+    }
+
+    public function pmsStatusBadgeClass(): string
+    {
+        return match ($this->pms_status) {
+            self::PMS_ASSIGNED => 'badge-info',
+            self::PMS_CHECKED_IN => 'badge-success',
+            self::PMS_CHECKED_OUT => 'badge-secondary',
+            default => 'badge-warning',
+        };
+    }
+
     public function guestName(): string
     {
         return trim(($this->guest_first_name ?? '').' '.($this->guest_last_name ?? '')) ?: '—';
     }
 
+    public function guestEmail(): ?string
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+        $guest = is_array($payload['guest'] ?? null) ? $payload['guest'] : [];
+
+        foreach (['email', 'guestEmail', 'guest_email'] as $key) {
+            $value = trim((string) ($guest[$key] ?? $payload[$key] ?? ''));
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    public function guestPhone(): ?string
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+        $guest = is_array($payload['guest'] ?? null) ? $payload['guest'] : [];
+
+        foreach (['phone', 'mobile', 'guestPhone', 'guest_phone'] as $key) {
+            $value = trim((string) ($guest[$key] ?? $payload[$key] ?? ''));
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
     public function isCancelled(): bool
     {
         return $this->status === self::STATUS_CANCELLED;
+    }
+
+    public function isArrivalToday(): bool
+    {
+        return ! $this->isCancelled() && (bool) $this->checkin?->isToday();
+    }
+
+    public function isCheckoutToday(): bool
+    {
+        return ! $this->isCancelled() && (bool) $this->checkout?->isToday();
+    }
+
+    public function rowHighlightClass(): string
+    {
+        if ($this->isCancelled()) {
+            return 'is-cancelled';
+        }
+
+        if ($this->isCheckoutToday()) {
+            return 'is-checkout-today';
+        }
+
+        if ($this->isArrivalToday()) {
+            return 'is-arrival-today';
+        }
+
+        return '';
+    }
+
+    public function canManageStay(): bool
+    {
+        return ! $this->isCancelled() && ! $this->isCheckedOut();
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function invoiceSendHistory(): array
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+        $history = $payload['invoice_send_history'] ?? [];
+
+        return is_array($history) ? $history : [];
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function stayChangeHistory(): array
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+        $history = $payload['stay_change_history'] ?? [];
+
+        return is_array($history) ? $history : [];
+    }
+
+    public function invoiceSentAtLabel(): ?string
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+        $sentAt = $payload['invoice_sent_at'] ?? null;
+
+        return $sentAt ? \Carbon\Carbon::parse($sentAt)->format('d/m/Y H:i') : null;
+    }
+
+    public function invoiceSentToLabel(): ?string
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+        $email = trim((string) ($payload['invoice_send_to'] ?? ''));
+
+        return $email !== '' ? $email : null;
     }
 
     /** @return list<array<string, mixed>> */
@@ -205,6 +416,22 @@ class CmReservation extends Model
         return $nights > 0 ? $nights : null;
     }
 
+    public function nightsRemaining(?\Carbon\Carbon $asOf = null): ?int
+    {
+        if ($this->checkout === null) {
+            return null;
+        }
+
+        $asOf = ($asOf ?? now())->copy()->startOfDay();
+        $checkout = $this->checkout->copy()->startOfDay();
+
+        if ($checkout->lte($asOf)) {
+            return 0;
+        }
+
+        return (int) $asOf->diffInDays($checkout);
+    }
+
     public function guestCount(): int
     {
         $lines = $this->roomLines();
@@ -237,6 +464,17 @@ class CmReservation extends Model
         }
 
         return '—';
+    }
+
+    public function isComplimentary(): bool
+    {
+        $payload = is_array($this->payload) ? $this->payload : [];
+
+        if (($payload['booking_type'] ?? '') === 'complimentary') {
+            return true;
+        }
+
+        return strcasecmp($this->categoryLabel(), 'Complimentary') === 0;
     }
 
     public function paymentLinkUrl(): ?string
@@ -340,6 +578,47 @@ class CmReservation extends Model
         }
 
         return ucfirst($payment);
+    }
+
+    public function isPrepaid(): bool
+    {
+        $label = strtolower($this->paymentLabel());
+
+        return str_contains($label, 'prepaid') || str_contains($label, 'paid');
+    }
+
+    public function totalDue(?float $pendingLateFee = null): float
+    {
+        $lateFee = max(0, (float) ($pendingLateFee ?? 0));
+        $roomDue = $this->isPrepaid() ? 0.0 : (float) ($this->amount_after_tax ?? 0);
+
+        return round($roomDue + $lateFee, 2);
+    }
+
+    public function effectiveAmountPaid(): float
+    {
+        return round(max(0, (float) ($this->amount_paid ?? 0)), 2);
+    }
+
+    public function balanceDue(?float $pendingLateFee = null): float
+    {
+        return round(max(0, $this->totalDue($pendingLateFee) - $this->effectiveAmountPaid()), 2);
+    }
+
+    public function isPaymentCleared(?float $additionalLateFee = null): bool
+    {
+        return $this->balanceDue($additionalLateFee) <= 0.009;
+    }
+
+    public function balanceLabel(?float $additionalLateFee = null): string
+    {
+        $balance = $this->balanceDue($additionalLateFee);
+
+        if ($balance <= 0.009) {
+            return 'Paid';
+        }
+
+        return number_format($balance, 2).' '.($this->currency ?? '');
     }
 
     public function priceLabel(): string
@@ -449,21 +728,42 @@ class CmReservation extends Model
             ];
         }
 
+        $payload = is_array($this->payload) ? $this->payload : [];
+        $guest = is_array($payload['guest'] ?? null) ? $payload['guest'] : [];
+
         return [
             'summary' => array_filter([
                 'Booking ID' => $this->booking_id,
                 'Status' => $this->statusLabel(),
+                'PMS Status' => $this->pmsStatusLabel(),
                 'Channel' => $this->channel,
+                'Source' => $this->sourceDisplayLabel() !== '—' ? $this->sourceDisplayLabel() : null,
                 'Guest' => $this->guestName(),
+                'Email' => $guest['email'] ?? null,
+                'Phone' => $guest['phone'] ?? $guest['mobile'] ?? null,
                 'Payment' => $this->paymentLabel(),
                 'Booked on' => $this->bookedOnLabel(),
+                'Booked by' => $payload['booked_by'] ?? null,
                 'Check-in' => $this->checkinLabel(),
                 'Check-out' => $this->checkoutLabel(),
-                'Room' => $this->roomLabel(),
+                'Assigned room' => $this->assignedRoomLabel() !== '—' ? $this->assignedRoomLabel() : null,
+                'Room type' => $this->roomLabel(),
                 'Room nights' => $this->roomNightCount(),
                 'Rooms count' => $this->roomCount() ?: null,
+                'Guests' => $this->guestCount() ?: null,
                 'Meal plan' => $this->mealPlanLabel() !== '—' ? $this->mealPlanLabel() : null,
+                'Category' => $this->categoryLabel() !== '—' ? $this->categoryLabel() : null,
+                'Segment' => $payload['segment'] ?? null,
+                'Bill to' => $payload['bill_to'] ?? null,
                 'Price' => $this->priceLabel() !== '—' ? $this->priceLabel() : null,
+                'Amount paid' => $this->effectiveAmountPaid() > 0 ? number_format($this->effectiveAmountPaid(), 2).' '.($this->currency ?? '') : null,
+                'Balance due' => $this->balanceDue() > 0.009 ? $this->balanceLabel() : null,
+                'Invoice sent to' => $this->invoiceSentToLabel(),
+                'Invoice sent at' => $this->invoiceSentAtLabel(),
+                'Last stay change' => ! empty($payload['last_stay_change_at'])
+                    ? \Carbon\Carbon::parse($payload['last_stay_change_at'])->format('d/m/Y H:i')
+                        .(! empty($payload['last_stay_change_reason']) ? ' — '.$payload['last_stay_change_reason'] : '')
+                    : null,
                 'Hotel code' => $this->hotel_code,
             ], fn ($value) => $value !== null && $value !== '' && $value !== '—'),
             'raw' => $raw,

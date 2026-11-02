@@ -9,11 +9,12 @@
     <title>@yield('title', 'Dashboard') - {{ config('app.name', 'Hotel SaaS') }}</title>
     <link rel="stylesheet" type="text/css" href="{{ asset('panel-assets/css/main.css') }}">
     <link rel="stylesheet" type="text/css" href="{{ asset('panel-assets/css/brand.css') }}">
+    <link rel="stylesheet" type="text/css" href="{{ asset('assets/css/admin.css') }}">
+    <link rel="stylesheet" type="text/css" href="{{ asset('panel-assets/css/sweetalert2.min.css') }}">
     <link rel="stylesheet" type="text/css" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
     @stack('styles')
   </head>
   <body class="app sidebar-mini rtl">
-    @include('layouts.partials._page-loader')
     @include('layouts.partials._header')
     @include(auth()->user()->isPlatformOwner() ? 'layouts.partials._sidebar' : 'layouts.partials._sidebar-hotel')
 
@@ -44,25 +45,8 @@
     <script src="{{ asset('panel-assets/js/bootstrap.min.js') }}"></script>
     <script src="{{ asset('panel-assets/js/main.js') }}"></script>
     <script src="{{ asset('panel-assets/js/plugins/sweetalert.min.js') }}"></script>
-    <script src="{{ asset('panel-assets/js/app-alerts.js') }}"></script>
-    <script>
-      (function () {
-        var loader = document.getElementById('appPageLoader');
-        if (!loader) return;
-
-        function hideLoader() {
-          loader.classList.add('is-done');
-          loader.setAttribute('aria-busy', 'false');
-        }
-
-        if (document.readyState === 'complete' || document.readyState === 'interactive') {
-          setTimeout(hideLoader, 0);
-        }
-        window.addEventListener('DOMContentLoaded', hideLoader);
-        window.addEventListener('load', hideLoader);
-        setTimeout(hideLoader, 4000);
-      })();
-    </script>
+    <script src="{{ asset('panel-assets/js/plugins/sweetalert2.min.js') }}"></script>
+    <script src="{{ asset('panel-assets/js/app-alerts.js') }}?v=2"></script>
     @include('layouts.partials._flash-swal')
     @stack('scripts')
   </body>

@@ -46,8 +46,8 @@ return [
             [
                 'title' => 'Configure your booking page',
                 'body' => 'Set policies, amenities, photos, and tracking under Booking Engine settings.',
-                'route' => 'hotel.settings.index',
-                'params' => ['tab' => 'be'],
+                'route' => 'hotel.booking-engine.website-config',
+                'params' => [],
                 'label' => 'BE Settings',
             ],
             [

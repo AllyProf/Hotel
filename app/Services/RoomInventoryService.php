@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\CmReservation;
 use App\Models\Hotel;
 use App\Models\HotelInventoryDay;
 use App\Models\HotelRoomInventory;
@@ -118,6 +119,9 @@ class RoomInventoryService
             ];
         }
 
+        $otaSlugs = $this->otaSlugsFor($hotel);
+        $defaultOtaOpen = array_fill_keys($otaSlugs, true);
+
         $isOpen = [];
         $otaAvailability = [];
         foreach ($dateKeys as $dateKey) {
@@ -125,15 +129,15 @@ class RoomInventoryService
                 $otaAvailability[$dateKey] = $this->normalizeOtaStatus($hotel, $dayFlags[$dateKey]->ota_status);
             } elseif (isset($dayFlags[$dateKey])) {
                 $open = (bool) $dayFlags[$dateKey]->is_open;
-                $otaAvailability[$dateKey] = array_fill_keys($this->otaSlugsFor($hotel), $open);
+                $otaAvailability[$dateKey] = array_fill_keys($otaSlugs, $open);
             } else {
-                $otaAvailability[$dateKey] = $this->defaultOtaStatus($hotel);
+                $otaAvailability[$dateKey] = $defaultOtaOpen;
             }
 
             $isOpen[$dateKey] = $this->availabilityState($otaAvailability[$dateKey]);
         }
 
-        $occupancy = array_fill_keys($dateKeys, 0.0);
+        $occupancy = $this->occupancyPercentByDate($hotel, $dateKeys, $rooms);
 
         return [
             'dates' => $dates,
@@ -143,7 +147,7 @@ class RoomInventoryService
             'otaAvailability' => $otaAvailability,
             'totals' => $totals,
             'occupancy' => $occupancy,
-            'configuredOtaCount' => count($this->otaSlugsFor($hotel)),
+            'configuredOtaCount' => count($otaSlugs),
         ];
     }
 
@@ -245,6 +249,21 @@ class RoomInventoryService
     /** @return array{available: int, requested: int, ok: bool, message: string, room_name: string} */
     public function checkStayAvailability(Hotel $hotel, int $roomId, Carbon $checkin, Carbon $checkout, int $requested): array
     {
+        return $this->checkStayAvailabilityWithCredits($hotel, $roomId, $checkin, $checkout, $requested);
+    }
+
+    /**
+     * @param  array<string, int>  $creditByDate  Extra rooms to treat as available (e.g. this booking's current hold).
+     * @return array{available: int, requested: int, ok: bool, message: string, room_name: string}
+     */
+    public function checkStayAvailabilityWithCredits(
+        Hotel $hotel,
+        int $roomId,
+        Carbon $checkin,
+        Carbon $checkout,
+        int $requested,
+        array $creditByDate = []
+    ): array {
         $room = $hotel->rooms()->where('is_enabled', true)->find($roomId);
         $roomName = $room ? ($room->display_name ?: $room->name) : 'Room';
 
@@ -269,7 +288,7 @@ class RoomInventoryService
         }
 
         $requested = max(1, $requested);
-        $minAvailable = $this->minAvailableForStay($room, $checkin, $checkout);
+        $minAvailable = $this->minAvailableForStayWithCredits($room, $checkin, $checkout, $creditByDate);
 
         if ($requested <= $minAvailable) {
             return [
@@ -292,7 +311,18 @@ class RoomInventoryService
 
     public function minAvailableForStay(\App\Models\HotelRoom $room, Carbon $checkin, Carbon $checkout): int
     {
+        return $this->minAvailableForStayWithCredits($room, $checkin, $checkout);
+    }
+
+    /** @param array<string, int> $creditByDate */
+    public function minAvailableForStayWithCredits(
+        \App\Models\HotelRoom $room,
+        Carbon $checkin,
+        Carbon $checkout,
+        array $creditByDate = []
+    ): int {
         $minAvailable = PHP_INT_MAX;
+        $capacity = max(1, (int) $room->room_count);
 
         foreach (CarbonPeriod::create($checkin->copy()->startOfDay(), '1 day', $checkout->copy()->subDay()) as $day) {
             $dateKey = Carbon::parse($day)->format('Y-m-d');
@@ -301,10 +331,56 @@ class RoomInventoryService
                 ->where('date', $dateKey)
                 ->first();
 
-            $available = $row ? (int) $row->available_count : (int) $room->room_count;
+            $available = $row ? (int) $row->available_count : $capacity;
+            $available += (int) ($creditByDate[$dateKey] ?? 0);
+            $available = min($capacity, max(0, $available));
             $minAvailable = min($minAvailable, $available);
         }
 
         return $minAvailable === PHP_INT_MAX ? 0 : max(0, $minAvailable);
+    }
+
+    /**
+     * Occupied room-nights from active reservations vs total sellable room count.
+     *
+     * @param  Collection<int, \App\Models\HotelRoom>  $rooms
+     * @return array<string, float>
+     */
+    private function occupancyPercentByDate(Hotel $hotel, array $dateKeys, Collection $rooms): array
+    {
+        $totalCapacity = (int) $rooms->sum(fn ($room) => (int) $room->room_count);
+
+        if ($totalCapacity <= 0 || $dateKeys === []) {
+            return array_fill_keys($dateKeys, 0.0);
+        }
+
+        $reservations = CmReservation::query()
+            ->where('hotel_id', $hotel->id)
+            ->where('status', '!=', CmReservation::STATUS_CANCELLED)
+            ->whereDate('checkout', '>', $dateKeys[0])
+            ->whereDate('checkin', '<=', end($dateKeys))
+            ->get();
+
+        $percent = [];
+
+        foreach ($dateKeys as $dateKey) {
+            $sold = (int) $reservations->sum(function (CmReservation $reservation) use ($dateKey) {
+                $checkin = $reservation->checkin?->format('Y-m-d');
+                $checkout = $reservation->checkout?->format('Y-m-d');
+
+                if (! $checkin || ! $checkout || $dateKey < $checkin || $dateKey >= $checkout) {
+                    return 0;
+                }
+
+                $count = $reservation->roomCount();
+
+                return $count > 0 ? $count : 1;
+            });
+
+            $occupied = min($totalCapacity, $sold);
+            $percent[$dateKey] = round(($occupied / $totalCapacity) * 100, 0);
+        }
+
+        return $percent;
     }
 }

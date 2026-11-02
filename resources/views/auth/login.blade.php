@@ -11,7 +11,7 @@
       <h1>{{ config('app.name', 'Hotel SaaS') }}</h1>
     </div>
     <div class="login-box">
-      <form class="login-form" action="{{ route('login') }}" method="POST">
+      <form class="login-form js-auth-login-form" action="{{ route('login') }}" method="POST" data-loader-text="Signing in...">
         @csrf
         <h3 class="login-head"><i class="fa fa-lg fa-fw fa-user"></i>SIGN IN</h3>
 
@@ -40,7 +40,7 @@
           </div>
         </div>
         <div class="form-group btn-container">
-          <button class="btn btn-primary btn-block" type="submit">
+          <button class="btn btn-primary btn-block js-auth-login-submit" type="submit">
             <i class="fa fa-sign-in fa-lg fa-fw"></i>SIGN IN
           </button>
         </div>
@@ -48,3 +48,23 @@
     </div>
   </section>
 @endsection
+
+@push('scripts')
+  <script>
+    (function () {
+      document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.classList.contains('js-auth-login-form')) {
+          return;
+        }
+        var btn = form.querySelector('.js-auth-login-submit');
+        if (!btn || btn.disabled) {
+          return;
+        }
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+        btn.innerHTML = '<i class="fa fa-spinner fa-spin fa-lg fa-fw"></i> SIGNING IN...';
+      }, true);
+    })();
+  </script>
+@endpush

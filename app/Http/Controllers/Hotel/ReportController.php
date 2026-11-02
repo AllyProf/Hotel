@@ -27,7 +27,7 @@ class ReportController extends Controller
         $submitted = $request->has('submitted');
         $result = $submitted
             ? $this->reports->generate($hotel, $hotelCode, $filters)
-            : ['available' => false, 'title' => '', 'columns' => [], 'rows' => []];
+            : ['available' => false, 'title' => '', 'columns' => [], 'rows' => [], 'summary' => null];
 
         return view('hotel.pms.reports.index', [
             'hotel' => $hotel,
@@ -54,8 +54,23 @@ class ReportController extends Controller
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->fromArray([$result['columns']]);
 
-        foreach ($result['rows'] as $index => $row) {
-            $sheet->fromArray([array_values($row)], null, 'A'.($index + 2));
+        $rowOffset = 2;
+        foreach ($result['rows'] as $row) {
+            unset($row['_kind']);
+            $line = collect($result['columns'])->map(fn (string $column) => $row[$column] ?? '')->values()->all();
+            $sheet->fromArray([$line], null, 'A'.$rowOffset);
+            $rowOffset++;
+        }
+
+        foreach ($result['summary']['revenue_totals'] ?? [] as $block) {
+            $rowOffset += 2;
+            $sheet->setCellValue('A'.$rowOffset, ($block['currency'] ?? '').' revenue totals');
+            $rowOffset++;
+            foreach ($block['items'] ?? [] as $item) {
+                $sheet->setCellValue('A'.$rowOffset, $item['label'] ?? '');
+                $sheet->setCellValue('B'.$rowOffset, $item['value'] ?? '');
+                $rowOffset++;
+            }
         }
 
         foreach (range('A', $sheet->getHighestColumn()) as $column) {

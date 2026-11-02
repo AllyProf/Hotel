@@ -156,6 +156,11 @@ class Hotel extends Model
         return $this->hasMany(HotelPmsCategory::class);
     }
 
+    public function storeCategories(): HasMany
+    {
+        return $this->hasMany(HotelStoreCategory::class);
+    }
+
     public function roles(): HasMany
     {
         return $this->hasMany(HotelRole::class);

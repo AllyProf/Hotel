@@ -4,12 +4,14 @@ namespace App\Services;
 
 use App\Models\CmReservation;
 use App\Models\Hotel;
+use App\Models\HotelCompany;
 use App\Models\HotelRatePlan;
 use App\Models\HotelRoom;
 use App\Services\ChannelManager\ChannelManagerCodeResolver;
 use App\Services\ChannelManager\ReservationInventoryService;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class CreateReservationService
 {
@@ -79,6 +81,7 @@ class CreateReservationService
             'local_currency' => strtoupper($firstPlan?->local_currency ?: $hotel->currency ?: 'USD'),
             'default_country' => $hotel->country ?: 'Tanzania',
             'default_country_code' => $hotel->country_code ?: 'TZ',
+            'default_phone_code' => $hotel->phone_country_code ?: '+255',
             'default_guest_type' => old('guest_type', 'local'),
             'default_checkin' => now()->format('Y-m-d'),
             'default_checkout' => now()->addDay()->format('Y-m-d'),
@@ -89,6 +92,56 @@ class CreateReservationService
             'default_segment' => ($reservation['segments'][0] ?? 'Leisure'),
             'default_payment_mode' => ($reservation['payment_modes'][0] ?? 'Cash'),
             'channels' => $reservation['channels'] ?? ['PMS', 'Direct', 'Phone', 'Walk-in'],
+            'vat_rate' => $this->settings->vatRate($hotel),
+            'payment_provider_config' => $this->settings->paymentProviderConfig($hotel),
+        ];
+    }
+
+    /**
+     * @return array{
+     *     amount_after_tax: float,
+     *     amount_before_tax: float,
+     *     tax: float,
+     *     daily_tax: float,
+     *     vat_rate: float
+     * }
+     */
+    public function calculateRoomCharges(
+        float $dailyRate,
+        ?float $dailyTax,
+        bool $taxInclusive,
+        float $vatRate,
+        int $nights,
+        int $roomCount,
+    ): array {
+        $nights = max(1, $nights);
+        $roomCount = max(1, $roomCount);
+        $multiplier = $nights * $roomCount;
+        $vatRate = max(0, min(100, $vatRate));
+
+        if ($taxInclusive) {
+            $grossPerNight = max(0, $dailyRate);
+            $taxPerNight = $vatRate > 0
+                ? round($grossPerNight * ($vatRate / (100 + $vatRate)), 2)
+                : 0.0;
+            $netPerNight = round($grossPerNight - $taxPerNight, 2);
+        } else {
+            $netPerNight = max(0, $dailyRate);
+            $taxPerNight = $dailyTax !== null && $dailyTax >= 0
+                ? round($dailyTax, 2)
+                : ($vatRate > 0 ? round($netPerNight * $vatRate / 100, 2) : 0.0);
+        }
+
+        $amountBeforeTax = round($netPerNight * $multiplier, 2);
+        $tax = round($taxPerNight * $multiplier, 2);
+        $amountAfterTax = round($amountBeforeTax + $tax, 2);
+
+        return [
+            'amount_after_tax' => $amountAfterTax,
+            'amount_before_tax' => $amountBeforeTax,
+            'tax' => $tax,
+            'daily_tax' => $taxPerNight,
+            'vat_rate' => $vatRate,
         ];
     }
 
@@ -100,11 +153,16 @@ class CreateReservationService
         $checkout = Carbon::parse($data['checkout'])->startOfDay();
         $nights = max(1, $checkin->diffInDays($checkout));
         $taxInclusive = ! empty($data['tax_inclusive']);
-        $discountPercent = max(0, min(100, (float) ($data['discount_percent'] ?? 0)));
+        $discountType = in_array($data['discount_type'] ?? '', ['percent', 'amount'], true)
+            ? $data['discount_type']
+            : 'percent';
+        $discountValue = max(0, (float) ($data['discount_value'] ?? $data['discount_percent'] ?? 0));
+        $discountPercent = null;
+        $discountAmount = null;
 
         $availabilityError = $this->validateGroupLinesAvailability($hotel, $data['lines'], $checkin, $checkout);
         if ($availabilityError !== null) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'lines' => $availabilityError,
             ]);
         }
@@ -141,19 +199,39 @@ class CreateReservationService
             ];
         }
 
-        if ($discountPercent > 0) {
-            $subtotal = round($subtotal * (1 - ($discountPercent / 100)), 2);
+        if ($discountType === 'amount') {
+            $discountAmount = $discountValue;
+            if ($discountAmount > 0) {
+                $subtotal = max(0, round($subtotal - $discountAmount, 2));
+            }
+        } else {
+            $discountPercent = min(100, $discountValue);
+            if ($discountPercent > 0) {
+                $subtotal = round($subtotal * (1 - ($discountPercent / 100)), 2);
+            }
         }
 
         $total = $subtotal;
+        $amountPaid = max(0, (float) ($data['advance_amount'] ?? 0));
+        $amountRemaining = max(0, round($total - $amountPaid, 2));
         [$firstName, $lastName] = $this->splitGuestName((string) $data['guest_name']);
         $currency = strtoupper($hotel->currency ?: 'USD');
+        $paymentMode = trim((string) ($data['payment_mode'] ?? ''));
+        $paymentProvider = $this->assertPaymentProvider($hotel, $paymentMode, $data['payment_provider'] ?? null);
+        $sendInvoiceToCompany = ! empty($data['send_invoice_to_company']);
+        $invoiceSendTo = null;
+
+        if ($sendInvoiceToCompany && ! empty($data['bill_to_company_id'])) {
+            $company = HotelCompany::query()
+                ->where('hotel_id', $hotel->id)
+                ->find($data['bill_to_company_id']);
+            $invoiceSendTo = trim((string) ($company?->email ?? '')) ?: null;
+        }
 
         $advance = array_filter([
-            'amount' => isset($data['advance_amount']) ? (float) $data['advance_amount'] : null,
-            'payment_mode' => $data['advance_payment_mode'] ?? null,
+            'amount' => $amountPaid > 0 ? $amountPaid : null,
+            'remaining' => $amountPaid > 0 && $amountRemaining > 0 ? $amountRemaining : null,
             'comments' => $data['advance_comments'] ?? null,
-            'attachment_path' => $data['advance_attachment_path'] ?? null,
         ], fn ($value) => $value !== null && $value !== '' && $value !== 0.0);
 
         $payload = array_filter([
@@ -166,11 +244,17 @@ class CreateReservationService
             'segment' => $data['segment'] ?? null,
             'bill_to' => $data['bill_to'] ?? null,
             'bill_to_company_id' => $data['bill_to_company_id'] ?? null,
-            'paymentType' => $data['payment_mode'] ?? null,
+            'paymentType' => $paymentMode !== '' ? $paymentMode : null,
+            'payment_provider' => $paymentProvider !== '' ? $paymentProvider : null,
             'tax_inclusive' => $taxInclusive,
-            'discount_percent' => $discountPercent > 0 ? $discountPercent : null,
+            'discount_type' => $discountType,
+            'discount_percent' => $discountPercent !== null && $discountPercent > 0 ? $discountPercent : null,
+            'discount_amount' => $discountAmount !== null && $discountAmount > 0 ? $discountAmount : null,
             'nights' => $nights,
             'advance_payment' => $advance !== [] ? $advance : null,
+            'send_invoice_to_company' => $sendInvoiceToCompany ? true : null,
+            'invoice_send_to' => $invoiceSendTo,
+            'amount_remaining' => $amountPaid > 0 && $amountRemaining > 0 ? $amountRemaining : null,
             'guest' => array_filter([
                 'email' => $data['guest_email'] ?? null,
                 'phone' => $data['guest_phone'] ?? null,
@@ -194,6 +278,7 @@ class CreateReservationService
             'guest_last_name' => $lastName,
             'amount_after_tax' => $total,
             'amount_before_tax' => $total,
+            'amount_paid' => $amountPaid,
             'tax' => 0,
             'currency' => $currency,
             'rooms' => $roomPayload,
@@ -230,7 +315,7 @@ class CreateReservationService
 
         $availabilityError = $this->validateMultiBookingsAvailability($hotel, $bookings);
         if ($availabilityError !== null) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'bookings' => $availabilityError,
             ]);
         }
@@ -238,11 +323,368 @@ class CreateReservationService
         $batchId = 'MB-'.strtoupper(Str::random(8));
         $created = [];
 
-        foreach ($bookings as $booking) {
-            $created[] = $this->createMultiBooking($hotel, $booking, $batchId);
+        foreach ($bookings as $index => $booking) {
+            $this->assertPaymentProvider(
+                $hotel,
+                (string) ($booking['payment_mode'] ?? ''),
+                $booking['payment_provider'] ?? null,
+                "bookings.{$index}.payment_provider",
+            );
+
+            $created[] = $this->createMultiBooking(
+                $hotel,
+                $booking,
+                $batchId,
+                $this->multiBookingFinancial($hotel, $booking),
+            );
         }
 
         return $created;
+    }
+
+    /** @param  array<string, mixed>  $data */
+    public function storeComplimentary(Hotel $hotel, array $data): CmReservation
+    {
+        $hotelCode = $this->codes->hotelCode($hotel);
+        $room = HotelRoom::query()->where('hotel_id', $hotel->id)->findOrFail($data['hotel_room_id']);
+        $plan = HotelRatePlan::query()
+            ->where('hotel_id', $hotel->id)
+            ->where('hotel_room_id', $room->id)
+            ->findOrFail($data['hotel_rate_plan_id']);
+
+        $checkin = Carbon::parse($data['checkin'])->startOfDay();
+        $checkout = Carbon::parse($data['checkout'])->startOfDay();
+        $nights = max(1, $checkin->diffInDays($checkout));
+        $roomCount = max(1, (int) $data['room_count']);
+        $guestCount = max(1, (int) $data['guest_count']);
+
+        $availability = $this->roomInventory->checkStayAvailability(
+            $hotel,
+            $room->id,
+            $checkin,
+            $checkout,
+            $roomCount,
+        );
+
+        if (! $availability['ok']) {
+            throw ValidationException::withMessages([
+                'checkin' => $availability['message'],
+            ]);
+        }
+
+        [$firstName, $lastName] = $this->splitGuestName((string) $data['guest_name']);
+        $referenceRate = (float) $plan->rateForGuestType('international');
+        $currency = strtoupper($plan->international_currency ?: $hotel->currency ?: 'USD');
+        $reason = trim((string) ($data['complimentary_reason'] ?? ''));
+        $reasons = config('hotel_pms.complimentary.reasons', []);
+        $reasonLabel = $reasons[$reason] ?? $reason;
+
+        $payload = array_filter([
+            'source' => 'pms',
+            'booking_type' => 'complimentary',
+            'category' => 'Complimentary',
+            'complimentary_reason' => $reason !== '' ? $reason : null,
+            'complimentary_reason_label' => $reasonLabel !== '' ? $reasonLabel : null,
+            'reference_daily_rate' => $referenceRate > 0 ? $referenceRate : null,
+            'meal_plan' => $plan->meal_plan ?: null,
+            'paymentType' => 'Complimentary',
+            'pah' => true,
+            'nights' => $nights,
+            'guest' => array_filter([
+                'email' => $data['guest_email'] ?? null,
+                'phone' => $data['guest_phone'] ?? null,
+                'country' => $data['guest_country'] ?? null,
+                'country_code' => $data['guest_country_code'] ?? null,
+                'city' => $data['guest_city'] ?? null,
+                'special_request' => $data['special_request'] ?? null,
+            ]),
+        ], fn ($value) => $value !== null && $value !== '' && $value !== []);
+
+        return tap(CmReservation::query()->create([
+            'hotel_id' => $hotel->id,
+            'hotel_code' => $hotelCode,
+            'booking_id' => $this->generateBookingId($hotel),
+            'channel' => 'PMS',
+            'action' => 'book',
+            'status' => CmReservation::STATUS_CONFIRMED,
+            'checkin' => $checkin->format('Y-m-d'),
+            'checkout' => $checkout->format('Y-m-d'),
+            'guest_first_name' => $firstName,
+            'guest_last_name' => $lastName,
+            'amount_after_tax' => 0,
+            'amount_before_tax' => 0,
+            'tax' => 0,
+            'amount_paid' => 0,
+            'currency' => $currency,
+            'rooms' => [[
+                'roomCode' => $this->codes->roomCode($hotel, $room),
+                'roomName' => $room->display_name ?: $room->name,
+                'rateplanCode' => $this->codes->rateplanCode($hotel, $plan),
+                'mealPlan' => $plan->meal_plan ?: null,
+                'numberOfRooms' => $roomCount,
+                'occupancy' => [
+                    'adults' => $guestCount,
+                    'children' => 0,
+                ],
+            ]],
+            'payload' => $payload,
+        ]), function (CmReservation $reservation) use ($hotel) {
+            $this->inventorySync->syncAfterManualBooking($hotel, $reservation);
+        });
+    }
+
+    /** @param  array<string, mixed>  $data */
+    public function storeCompany(Hotel $hotel, array $data): CmReservation
+    {
+        $billToName = trim((string) ($data['bill_to'] ?? ''));
+
+        if ($billToName === '') {
+            throw ValidationException::withMessages([
+                'bill_to' => 'Please enter or import a company name.',
+            ]);
+        }
+
+        $company = null;
+
+        if (! empty($data['bill_to_company_id'])) {
+            $company = HotelCompany::query()
+                ->where('hotel_id', $hotel->id)
+                ->find($data['bill_to_company_id']);
+        }
+
+        $lines = $data['lines'] ?? [];
+        $checkin = Carbon::parse($data['checkin'])->startOfDay();
+        $checkout = Carbon::parse($data['checkout'])->startOfDay();
+        $nights = max(1, $checkin->diffInDays($checkout));
+        $taxInclusive = ! empty($data['tax_inclusive']);
+
+        $availabilityError = $this->validateGroupLinesAvailability($hotel, $lines, $checkin, $checkout);
+        if ($availabilityError !== null) {
+            throw ValidationException::withMessages([
+                'lines' => $availabilityError,
+            ]);
+        }
+
+        $hotelCode = $this->codes->hotelCode($hotel);
+        $financial = $this->companyBookingFinancial($hotel, $company, $data);
+        $chargeTotals = $this->companyLinesChargeTotals($hotel, $company, $lines, $checkin, $checkout, $taxInclusive);
+        [$firstName, $lastName] = $this->splitGuestName((string) $data['guest_name']);
+        $total = (float) $financial['amount_after_tax'];
+        $amountPaid = max(0, (float) ($financial['amount_paid'] ?? 0));
+        $amountRemaining = max(0, round($total - $amountPaid, 2));
+        $sendInvoiceToCompany = ! empty($data['send_invoice_to_company']);
+        $invoiceEmail = trim((string) ($data['company_contact_email'] ?? ''));
+
+        if ($invoiceEmail === '' && $company !== null) {
+            $invoiceEmail = trim((string) ($company->email ?? ''));
+        }
+
+        $invoiceSendTo = $sendInvoiceToCompany && $invoiceEmail !== '' ? $invoiceEmail : null;
+        $companyContactPhone = trim(
+            ($data['company_contact_phone_country_code'] ?? '').ltrim((string) ($data['company_contact_phone'] ?? ''), '0')
+        ) ?: null;
+
+        $discountType = $financial['discount_type'] ?? null;
+        $discountValue = isset($financial['discount_value']) ? (float) $financial['discount_value'] : null;
+        $discountPercent = null;
+        $discountAmount = null;
+
+        if ($discountType === 'amount' && $discountValue > 0) {
+            $discountAmount = $discountValue;
+        } elseif ($discountType === 'percent' && $discountValue > 0) {
+            $discountPercent = min(100, $discountValue);
+        }
+
+        $advance = array_filter([
+            'amount' => $amountPaid > 0 ? $amountPaid : null,
+            'remaining' => $amountPaid > 0 && $amountRemaining > 0 ? $amountRemaining : null,
+            'comments' => $financial['advance_comments'] ?? null,
+        ], fn ($value) => $value !== null && $value !== '' && $value !== 0.0);
+
+        $ratio = $chargeTotals['amount_after_tax'] > 0 ? ($total / $chargeTotals['amount_after_tax']) : 1;
+        $roomPayload = [];
+        $currency = strtoupper($hotel->currency ?: 'USD');
+        $firstPlan = null;
+
+        foreach ($lines as $line) {
+            $room = HotelRoom::query()->where('hotel_id', $hotel->id)->findOrFail($line['hotel_room_id']);
+            $plan = HotelRatePlan::query()
+                ->where('hotel_id', $hotel->id)
+                ->where('hotel_room_id', $room->id)
+                ->findOrFail($line['hotel_rate_plan_id']);
+
+            if ($firstPlan === null) {
+                $firstPlan = $plan;
+                $currency = strtoupper($plan->international_currency ?: $hotel->currency ?: 'USD');
+            }
+
+            $roomCount = max(1, (int) $line['room_count']);
+            $guestCount = max(1, (int) $line['guest_count']);
+            $dailyRate = $this->companyLineDailyRate($hotel, $company, $line);
+
+            $roomPayload[] = [
+                'roomCode' => $this->codes->roomCode($hotel, $room),
+                'roomName' => $room->display_name ?: $room->name,
+                'rateplanCode' => $this->codes->rateplanCode($hotel, $plan),
+                'mealPlan' => $plan->meal_plan ?: null,
+                'numberOfRooms' => $roomCount,
+                'dailyRate' => $dailyRate,
+                'occupancy' => [
+                    'adults' => $guestCount,
+                    'children' => 0,
+                ],
+            ];
+        }
+
+        $payload = array_filter([
+            'source' => 'pms',
+            'booking_type' => 'company',
+            'category' => 'Company',
+            'segment' => $data['segment'] ?? 'Corporate',
+            'bill_to' => $billToName,
+            'bill_to_company_id' => $company?->id,
+            'company_contact' => array_filter([
+                'name' => trim((string) ($data['company_contact_person'] ?? '')) ?: null,
+                'email' => trim((string) ($data['company_contact_email'] ?? '')) ?: null,
+                'phone' => $companyContactPhone,
+            ]),
+            'meal_plan' => $firstPlan?->meal_plan ?: null,
+            'paymentType' => 'Bill to Company',
+            'pah' => false,
+            'tax_inclusive' => $taxInclusive,
+            'vat_rate' => $chargeTotals['vat_rate'],
+            'nights' => $nights,
+            'discount_type' => $discountType,
+            'discount_percent' => $discountPercent,
+            'discount_amount' => $discountAmount,
+            'advance_payment' => $advance !== [] ? $advance : null,
+            'amount_remaining' => $amountPaid > 0 && $amountRemaining > 0 ? $amountRemaining : null,
+            'send_invoice_to_company' => $sendInvoiceToCompany ? true : null,
+            'invoice_send_to' => $invoiceSendTo ?: null,
+            'guest' => array_filter([
+                'email' => $data['guest_email'] ?? null,
+                'phone' => $data['guest_phone'] ?? null,
+                'country' => $data['guest_country'] ?? null,
+                'country_code' => $data['guest_country_code'] ?? null,
+                'city' => $data['guest_city'] ?? null,
+                'special_request' => $data['special_request'] ?? null,
+            ]),
+        ], fn ($value) => $value !== null && $value !== '' && $value !== []);
+
+        return tap(CmReservation::query()->create([
+            'hotel_id' => $hotel->id,
+            'hotel_code' => $hotelCode,
+            'booking_id' => $this->generateBookingId($hotel),
+            'channel' => 'PMS',
+            'action' => 'book',
+            'status' => CmReservation::STATUS_CONFIRMED,
+            'checkin' => $checkin->format('Y-m-d'),
+            'checkout' => $checkout->format('Y-m-d'),
+            'guest_first_name' => $firstName,
+            'guest_last_name' => $lastName,
+            'amount_after_tax' => $total,
+            'amount_before_tax' => round($chargeTotals['amount_before_tax'] * $ratio, 2),
+            'tax' => round($chargeTotals['tax'] * $ratio, 2),
+            'amount_paid' => $amountPaid > 0 ? $amountPaid : null,
+            'currency' => $currency,
+            'rooms' => $roomPayload,
+            'payload' => $payload,
+        ]), function (CmReservation $reservation) use ($hotel) {
+            $this->inventorySync->syncAfterManualBooking($hotel, $reservation);
+        });
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $lines
+     * @return array{amount_after_tax: float, amount_before_tax: float, tax: float, vat_rate: float}
+     */
+    private function companyLinesChargeTotals(
+        Hotel $hotel,
+        ?HotelCompany $company,
+        array $lines,
+        Carbon $checkin,
+        Carbon $checkout,
+        bool $taxInclusive,
+    ): array {
+        $nights = max(1, $checkin->diffInDays($checkout));
+        $vatRate = $this->settings->vatRate($hotel);
+        $amountAfterTax = 0.0;
+        $amountBeforeTax = 0.0;
+        $tax = 0.0;
+
+        foreach ($lines as $line) {
+            $roomCount = max(1, (int) $line['room_count']);
+            $dailyRate = $this->companyLineDailyRate($hotel, $company, $line);
+            $charges = $this->calculateRoomCharges(
+                $dailyRate,
+                null,
+                $taxInclusive,
+                $vatRate,
+                $nights,
+                $roomCount,
+            );
+            $amountAfterTax += $charges['amount_after_tax'];
+            $amountBeforeTax += $charges['amount_before_tax'];
+            $tax += $charges['tax'];
+        }
+
+        return [
+            'amount_after_tax' => round($amountAfterTax, 2),
+            'amount_before_tax' => round($amountBeforeTax, 2),
+            'tax' => round($tax, 2),
+            'vat_rate' => $vatRate,
+        ];
+    }
+
+    /** @param  array<string, mixed>  $line */
+    private function companyLineDailyRate(Hotel $hotel, ?HotelCompany $company, array $line): float
+    {
+        if ($company !== null) {
+            $planId = (string) ($line['hotel_rate_plan_id'] ?? '');
+            $rates = is_array($company->contracted_rates) ? $company->contracted_rates : [];
+
+            if ($planId !== '' && isset($rates[$planId]) && (float) $rates[$planId] > 0) {
+                return (float) $rates[$planId];
+            }
+        }
+
+        return $this->multiBookingDailyRate($hotel, $line);
+    }
+
+    /** @param  array<string, mixed>  $data @return array<string, mixed> */
+    private function companyBookingFinancial(Hotel $hotel, ?HotelCompany $company, array $data): array
+    {
+        $checkin = Carbon::parse($data['checkin'])->startOfDay();
+        $checkout = Carbon::parse($data['checkout'])->startOfDay();
+        $taxInclusive = ! empty($data['tax_inclusive']);
+        $grossTotal = $this->companyLinesChargeTotals(
+            $hotel,
+            $company,
+            $data['lines'] ?? [],
+            $checkin,
+            $checkout,
+            $taxInclusive,
+        )['amount_after_tax'];
+
+        $discountType = in_array($data['discount_type'] ?? '', ['percent', 'amount'], true)
+            ? $data['discount_type']
+            : 'percent';
+        $discountValue = max(0, (float) ($data['discount_value'] ?? $data['discount_percent'] ?? 0));
+        $discountAmount = 0.0;
+
+        if ($discountType === 'amount') {
+            $discountAmount = min($discountValue, $grossTotal);
+        } elseif ($discountValue > 0) {
+            $discountAmount = $grossTotal * (min(100, $discountValue) / 100);
+        }
+
+        return [
+            'amount_after_tax' => max(0, round($grossTotal - $discountAmount, 2)),
+            'amount_paid' => max(0, (float) ($data['advance_amount'] ?? 0)),
+            'discount_type' => $discountType,
+            'discount_value' => $discountValue > 0 ? $discountValue : null,
+            'advance_comments' => trim((string) ($data['advance_comments'] ?? '')) ?: null,
+        ];
     }
 
     /**
@@ -277,8 +719,8 @@ class CreateReservationService
         return $this->roomInventory->checkStayAvailability($hotel, $roomId, $checkinDate, $checkoutDate, $requested);
     }
 
-    /** @param  array<string, mixed>  $data */
-    private function createMultiBooking(Hotel $hotel, array $data, string $batchId): CmReservation
+    /** @param  array<string, mixed>  $data @param  array<string, mixed>  $financial */
+    private function createMultiBooking(Hotel $hotel, array $data, string $batchId, array $financial = []): CmReservation
     {
         $hotelCode = $this->codes->hotelCode($hotel);
         $room = HotelRoom::query()->where('hotel_id', $hotel->id)->findOrFail($data['hotel_room_id']);
@@ -292,12 +734,40 @@ class CreateReservationService
         $nights = max(1, $checkin->diffInDays($checkout));
         $roomCount = max(1, (int) $data['room_count']);
         $guestCount = max(1, (int) $data['guest_count']);
-        $dailyRate = (float) $data['daily_rate'];
+        $dailyRate = $this->multiBookingDailyRate($hotel, $data);
         $taxInclusive = ! empty($data['tax_inclusive']);
-        $total = round($dailyRate * $nights * $roomCount, 2);
+        $vatRate = $this->settings->vatRate($hotel);
+        $charges = $this->calculateRoomCharges($dailyRate, null, $taxInclusive, $vatRate, $nights, $roomCount);
+        $grossTotal = $charges['amount_after_tax'];
+        $total = isset($financial['amount_after_tax'])
+            ? (float) $financial['amount_after_tax']
+            : $grossTotal;
+        $ratio = $grossTotal > 0 ? ($total / $grossTotal) : 1;
+        $amountBeforeTax = round($charges['amount_before_tax'] * $ratio, 2);
+        $tax = round($charges['tax'] * $ratio, 2);
+        $amountPaid = max(0, (float) ($financial['amount_paid'] ?? 0));
+        $amountRemaining = max(0, round($total - $amountPaid, 2));
 
         [$firstName, $lastName] = $this->splitGuestName((string) $data['guest_name']);
+        $paymentMode = trim((string) ($data['payment_mode'] ?? ''));
+        $paymentProvider = trim((string) ($data['payment_provider'] ?? ''));
         $currency = strtoupper($plan->international_currency ?: $hotel->currency ?: 'USD');
+        $discountType = $financial['discount_type'] ?? null;
+        $discountValue = isset($financial['discount_value']) ? (float) $financial['discount_value'] : null;
+        $discountPercent = null;
+        $discountAmount = null;
+
+        if ($discountType === 'amount' && $discountValue > 0) {
+            $discountAmount = $discountValue;
+        } elseif ($discountType === 'percent' && $discountValue > 0) {
+            $discountPercent = min(100, $discountValue);
+        }
+
+        $advance = array_filter([
+            'amount' => $amountPaid > 0 ? $amountPaid : null,
+            'remaining' => $amountPaid > 0 && $amountRemaining > 0 ? $amountRemaining : null,
+            'comments' => $financial['advance_comments'] ?? null,
+        ], fn ($value) => $value !== null && $value !== '' && $value !== 0.0);
 
         $payload = array_filter([
             'source' => 'pms',
@@ -306,11 +776,21 @@ class CreateReservationService
             'category' => 'Multi',
             'channel' => 'PMS',
             'meal_plan' => $plan->meal_plan ?: null,
-            'paymentType' => $data['payment_mode'] ?? null,
-            'pah' => ($data['payment_mode'] ?? '') === 'Cash',
+            'paymentType' => $paymentMode !== '' ? $paymentMode : null,
+            'payment_provider' => $paymentProvider !== '' ? $paymentProvider : null,
+            'pah' => $paymentMode === 'Cash',
             'tax_inclusive' => $taxInclusive,
+            'vat_rate' => $charges['vat_rate'],
             'daily_rate' => $dailyRate,
+            'daily_tax' => $charges['daily_tax'],
             'nights' => $nights,
+            'discount_type' => $discountType,
+            'discount_percent' => $discountPercent,
+            'discount_amount' => $discountAmount,
+            'multi_discount_total' => $financial['multi_discount_total'] ?? null,
+            'multi_gross_total' => $financial['multi_gross_total'] ?? null,
+            'advance_payment' => $advance !== [] ? $advance : null,
+            'amount_remaining' => $amountPaid > 0 && $amountRemaining > 0 ? $amountRemaining : null,
             'guest' => array_filter([
                 'email' => $data['guest_email'] ?? null,
                 'phone' => $data['guest_phone'] ?? null,
@@ -332,8 +812,9 @@ class CreateReservationService
             'guest_first_name' => $firstName,
             'guest_last_name' => $lastName,
             'amount_after_tax' => $total,
-            'amount_before_tax' => $total,
-            'tax' => 0,
+            'amount_before_tax' => $amountBeforeTax,
+            'tax' => $tax,
+            'amount_paid' => $amountPaid > 0 ? $amountPaid : null,
             'currency' => $currency,
             'rooms' => [[
                 'roomCode' => $this->codes->roomCode($hotel, $room),
@@ -352,6 +833,88 @@ class CreateReservationService
         });
     }
 
+    /** @param  array<string, mixed>  $data @return array<string, mixed> */
+    private function multiBookingFinancial(Hotel $hotel, array $data): array
+    {
+        $grossTotal = $this->multiBookingGrossTotal($hotel, $data);
+        $discountType = in_array($data['discount_type'] ?? '', ['percent', 'amount'], true)
+            ? $data['discount_type']
+            : 'percent';
+        $discountValue = max(0, (float) ($data['discount_value'] ?? $data['discount_percent'] ?? 0));
+        $discountAmount = 0.0;
+
+        if ($discountType === 'amount') {
+            $discountAmount = min($discountValue, $grossTotal);
+        } elseif ($discountValue > 0) {
+            $discountAmount = $grossTotal * (min(100, $discountValue) / 100);
+        }
+
+        return [
+            'amount_after_tax' => max(0, round($grossTotal - $discountAmount, 2)),
+            'amount_paid' => max(0, (float) ($data['advance_amount'] ?? 0)),
+            'discount_type' => $discountType,
+            'discount_value' => $discountValue > 0 ? $discountValue : null,
+            'advance_comments' => trim((string) ($data['advance_comments'] ?? '')) ?: null,
+        ];
+    }
+
+    /** @param  array<string, mixed>  $data */
+    private function multiBookingDailyRate(Hotel $hotel, array $data): float
+    {
+        $room = HotelRoom::query()->where('hotel_id', $hotel->id)->findOrFail($data['hotel_room_id']);
+        $plan = HotelRatePlan::query()
+            ->where('hotel_id', $hotel->id)
+            ->where('hotel_room_id', $room->id)
+            ->findOrFail($data['hotel_rate_plan_id']);
+
+        return (float) $plan->rateForGuestType('international');
+    }
+
+    /** @param  array<string, mixed>  $data */
+    private function multiBookingGrossTotal(Hotel $hotel, array $data): float
+    {
+        $checkin = Carbon::parse($data['checkin'])->startOfDay();
+        $checkout = Carbon::parse($data['checkout'])->startOfDay();
+        $nights = max(1, $checkin->diffInDays($checkout));
+        $roomCount = max(1, (int) $data['room_count']);
+        $dailyRate = $this->multiBookingDailyRate($hotel, $data);
+        $taxInclusive = ! empty($data['tax_inclusive']);
+        $vatRate = $this->settings->vatRate($hotel);
+
+        return $this->calculateRoomCharges(
+            $dailyRate,
+            null,
+            $taxInclusive,
+            $vatRate,
+            $nights,
+            $roomCount,
+        )['amount_after_tax'];
+    }
+
+    private function assertPaymentProvider(
+        Hotel $hotel,
+        string $paymentMode,
+        mixed $paymentProvider,
+        string $errorKey = 'payment_provider',
+    ): string {
+        $paymentProvider = trim((string) ($paymentProvider ?? ''));
+        $providerOptions = $this->settings->paymentProviderOptions($hotel, $paymentMode);
+
+        if ($providerOptions !== [] && $paymentProvider === '') {
+            throw ValidationException::withMessages([
+                $errorKey => 'Please select a '.$this->settings->paymentProviderLabel($paymentMode).'.',
+            ]);
+        }
+
+        if ($paymentProvider !== '' && ! in_array($paymentProvider, $providerOptions, true)) {
+            throw ValidationException::withMessages([
+                $errorKey => 'Selected payment provider is not valid.',
+            ]);
+        }
+
+        return $paymentProvider;
+    }
+
     /** @param  array<string, mixed>  $data */
     public function store(Hotel $hotel, array $data): CmReservation
     {
@@ -368,13 +931,16 @@ class CreateReservationService
         $roomCount = max(1, (int) $data['room_count']);
         $guestCount = max(1, (int) $data['guest_count']);
         $dailyRate = (float) $data['daily_rate'];
-        $dailyTax = (float) ($data['daily_tax'] ?? 0);
+        $dailyTax = array_key_exists('daily_tax', $data) ? (float) $data['daily_tax'] : null;
         $taxInclusive = ! empty($data['tax_inclusive']);
-        $lineRate = $taxInclusive ? $dailyRate : ($dailyRate + $dailyTax);
-        $total = round($lineRate * $nights * $roomCount, 2);
-        $taxTotal = $taxInclusive ? 0 : round($dailyTax * $nights * $roomCount, 2);
+        $vatRate = $this->settings->vatRate($hotel);
+        $charges = $this->calculateRoomCharges($dailyRate, $dailyTax, $taxInclusive, $vatRate, $nights, $roomCount);
+        $total = $charges['amount_after_tax'];
+        $taxTotal = $charges['tax'];
 
         [$firstName, $lastName] = $this->splitGuestName((string) $data['guest_name']);
+        $paymentMode = trim((string) ($data['payment_mode'] ?? ''));
+        $paymentProvider = $this->assertPaymentProvider($hotel, $paymentMode, $data['payment_provider'] ?? null);
 
         $guestType = ($data['guest_type'] ?? 'international') === 'local' ? 'local' : 'international';
         $currency = $guestType === 'local'
@@ -389,11 +955,13 @@ class CreateReservationService
             'segment' => $data['segment'] ?? null,
             'bill_to' => $data['bill_to'] ?? null,
             'bill_to_company_id' => $data['bill_to_company_id'] ?? null,
-            'paymentType' => $data['payment_mode'] ?? null,
-            'pah' => ($data['payment_mode'] ?? '') === 'Cash',
+            'paymentType' => $paymentMode !== '' ? $paymentMode : null,
+            'payment_provider' => $paymentProvider !== '' ? $paymentProvider : null,
+            'pah' => $paymentMode === 'Cash',
             'tax_inclusive' => $taxInclusive,
+            'vat_rate' => $charges['vat_rate'],
             'daily_rate' => $dailyRate,
-            'daily_tax' => $dailyTax,
+            'daily_tax' => $charges['daily_tax'],
             'nights' => $nights,
             'room_unit_id' => $data['room_unit_id'] ?? null,
             'guest' => array_filter([
@@ -404,7 +972,6 @@ class CreateReservationService
                 'country' => $data['guest_country'] ?? null,
                 'country_code' => $data['guest_country_code'] ?? null,
                 'city' => $data['guest_city'] ?? null,
-                'zip' => $data['guest_zip'] ?? null,
                 'address' => $data['guest_address'] ?? null,
                 'special_request' => $data['special_request'] ?? null,
                 'identity_type' => $data['identity_type'] ?? null,
@@ -425,7 +992,7 @@ class CreateReservationService
             'guest_first_name' => $firstName,
             'guest_last_name' => $lastName,
             'amount_after_tax' => $total,
-            'amount_before_tax' => $taxInclusive ? $total : max(0, $total - $taxTotal),
+            'amount_before_tax' => $charges['amount_before_tax'],
             'tax' => $taxTotal,
             'currency' => $currency,
             'rooms' => [[

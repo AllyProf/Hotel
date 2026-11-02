@@ -34,6 +34,7 @@
                   <th>#</th>
                   <th>Name</th>
                   <th>Email</th>
+                  <th>Department</th>
                   <th>Role</th>
                   <th>Branch</th>
                   <th>Status</th>
@@ -46,6 +47,7 @@
                     <td>{{ $staff->firstItem() + $loop->index }}</td>
                     <td><strong>{{ $member->name }}</strong></td>
                     <td>{{ $member->email }}</td>
+                    <td>{{ $member->department?->name ?? '—' }}</td>
                     <td>{{ $member->hotelRole?->name ?? '—' }}</td>
                     <td>{{ $member->branch?->name ?? '—' }}</td>
                     <td>
@@ -70,7 +72,7 @@
                   </tr>
                 @empty
                   <tr>
-                    <td colspan="7" class="text-center text-muted py-4">
+                    <td colspan="8" class="text-center text-muted py-4">
                       No staff yet. <a href="{{ route('hotel.staff.create') }}">Add your first team member</a>.
                     </td>
                   </tr>

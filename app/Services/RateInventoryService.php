@@ -6,6 +6,7 @@ use App\Models\Hotel;
 use App\Models\HotelRateInventory;
 use App\Models\HotelRatePlan;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 
 class RateInventoryService
 {
@@ -71,6 +72,7 @@ class RateInventoryService
             'roomGroups' => array_values($groupedRooms),
             'dynamicRates' => $dynamic,
             'availabilityMeta' => $availabilityMeta,
+            'compareLastYear' => $this->compareLastYearAverageRates($hotel, $rateGrid),
         ]);
     }
 
@@ -232,17 +234,29 @@ class RateInventoryService
             });
     }
 
+    /** @return Collection<int, HotelRatePlan> */
+    private function ratePlansForGrid(Hotel $hotel): Collection
+    {
+        if ($hotel->relationLoaded('ratePlans')) {
+            return $hotel->ratePlans
+                ->filter(fn (HotelRatePlan $plan) => $plan->room !== null)
+                ->values();
+        }
+
+        return $hotel->ratePlans()
+            ->with('room')
+            ->get()
+            ->filter(fn (HotelRatePlan $plan) => $plan->room !== null)
+            ->values();
+    }
+
     /** @return array<string, mixed> */
     public function grid(Hotel $hotel, Carbon $start): array
     {
         $dates = $this->inventoryService->dateRange($start);
         $dateKeys = $dates->map(fn (Carbon $d) => $d->format('Y-m-d'))->all();
 
-        $plans = $hotel->ratePlans()
-            ->with('room')
-            ->get()
-            ->filter(fn (HotelRatePlan $plan) => $plan->room !== null)
-            ->values();
+        $plans = $this->ratePlansForGrid($hotel);
 
         $overrides = HotelRateInventory::query()
             ->where('hotel_id', $hotel->id)
@@ -452,6 +466,73 @@ class RateInventoryService
         }
 
         return $cell['local'];
+    }
+
+    /**
+     * Average published/display rate across rate plans on the same calendar date one year ago.
+     *
+     * @param  array<string, mixed>  $rateGrid
+     * @return array<string, array{amount: ?int, label: string}>
+     */
+    private function compareLastYearAverageRates(Hotel $hotel, array $rateGrid): array
+    {
+        $dateKeys = $rateGrid['dateKeys'] ?? [];
+        $plans = $rateGrid['ratePlans'] ?? [];
+
+        if ($dateKeys === [] || $plans === []) {
+            return [];
+        }
+
+        $lastYearByCurrent = [];
+        foreach ($dateKeys as $dateKey) {
+            $lastYearByCurrent[$dateKey] = Carbon::parse($dateKey)->subYear()->format('Y-m-d');
+        }
+
+        $lastYearDates = array_values(array_unique($lastYearByCurrent));
+        $planIds = collect($plans)->pluck('id')->all();
+        $lyRangeStart = min($lastYearDates);
+        $lyRangeEnd = max($lastYearDates);
+
+        $overrides = HotelRateInventory::query()
+            ->where('hotel_id', $hotel->id)
+            ->whereIn('hotel_rate_plan_id', $planIds)
+            ->whereBetween('date', [$lyRangeStart, $lyRangeEnd])
+            ->get()
+            ->groupBy('hotel_rate_plan_id');
+
+        $result = [];
+
+        foreach ($dateKeys as $dateKey) {
+            $lyKey = $lastYearByCurrent[$dateKey];
+            $amounts = [];
+
+            foreach ($plans as $plan) {
+                $defaults = $plan['defaults'] ?? ['local' => null, 'international' => null];
+                $planOverrides = $overrides->get($plan['id'], collect())
+                    ->keyBy(fn (HotelRateInventory $row) => $row->date->format('Y-m-d'));
+                $override = $planOverrides[$lyKey] ?? null;
+
+                $cell = [
+                    'local' => $override?->local_rate !== null ? (float) $override->local_rate : $defaults['local'],
+                    'international' => $override?->international_rate !== null ? (float) $override->international_rate : $defaults['international'],
+                ];
+
+                $display = $this->displayRate($cell, $plan['pricing_mode'] ?? HotelRatePlan::PRICING_BOTH);
+
+                if ($display !== null && $display > 0) {
+                    $amounts[] = $display;
+                }
+            }
+
+            $avg = $amounts === [] ? null : (int) round(array_sum($amounts) / count($amounts));
+
+            $result[$dateKey] = [
+                'amount' => $avg,
+                'label' => Carbon::parse($lyKey)->format('d M Y'),
+            ];
+        }
+
+        return $result;
     }
 
     private function occupancyLetter(string $occupancy): string

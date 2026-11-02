@@ -20,7 +20,29 @@ class HotelSettingsService
             'whatsapp' => $this->defaultWhatsapp(),
             'laundry' => $this->defaultLaundry(),
             'reservation' => $this->defaultReservation(),
+            'hr' => $this->defaultHr(),
+            'bar' => $this->defaultBar(),
+            'hk_procurement' => $this->defaultDepartmentProcurement(),
+            'laundry_procurement' => $this->defaultDepartmentProcurement(),
+            'reception_procurement' => $this->defaultDepartmentProcurement(),
         ]);
+
+        if (! is_array($settings->hr)) {
+            $settings->update(['hr' => $this->defaultHr()]);
+            $settings = $settings->fresh();
+        }
+
+        if (! is_array($settings->bar)) {
+            $settings->update(['bar' => $this->defaultBar()]);
+            $settings = $settings->fresh();
+        }
+
+        foreach (['hk_procurement', 'laundry_procurement', 'reception_procurement'] as $procKey) {
+            if (! is_array($settings->{$procKey})) {
+                $settings->update([$procKey => $this->defaultDepartmentProcurement()]);
+                $settings = $settings->fresh();
+            }
+        }
 
         if (! is_array($settings->rateplan)) {
             $settings->update(['rateplan' => $this->defaultRateplan()]);
@@ -61,12 +83,15 @@ class HotelSettingsService
         if ($hotel->pmsServices()->count() === 0) {
             $hotel->pmsServices()->create([
                 'name' => 'Extra Charges',
+                'category' => 'other',
                 'amount' => 100,
+                'pricing_unit' => 'fixed',
                 'tax_category' => 'No Tax',
                 'hsn_code' => '996311',
                 'tax_inclusive' => true,
                 'visible_on_be' => false,
                 'amount_editable' => true,
+                'is_active' => true,
                 'comments' => 'Extra Charges',
             ]);
         }
@@ -109,7 +134,59 @@ class HotelSettingsService
             'tax_text' => '',
             'booking_confirmation_email' => '',
             'auto_send_payment_links' => false,
+            'front_desk_checkin_time' => '14:00',
+            'front_desk_checkout_time' => '11:00',
+            'late_checkout_amount' => 50,
+            'vat_rate' => 18,
         ];
+    }
+
+    public function vatRate(Hotel $hotel): float
+    {
+        $this->ensureDefaults($hotel);
+        $pms = is_array($hotel->settings?->pms) ? $hotel->settings->pms : [];
+        $rate = (float) ($pms['vat_rate'] ?? 18);
+
+        return max(0, min(100, round($rate, 2)));
+    }
+
+    /** @return array{bank_providers: list<string>, mobile_payment_providers: list<string>} */
+    public function paymentProviderConfig(Hotel $hotel): array
+    {
+        $this->ensureDefaults($hotel);
+        $reservation = is_array($hotel->settings?->reservation) ? $hotel->settings->reservation : [];
+        $defaults = $this->defaultReservation();
+
+        return [
+            'bank_providers' => array_values($reservation['bank_providers'] ?? $defaults['bank_providers'] ?? []),
+            'mobile_payment_providers' => array_values($reservation['mobile_payment_providers'] ?? $defaults['mobile_payment_providers'] ?? []),
+        ];
+    }
+
+    /** @return list<string> */
+    public function paymentProviderOptions(Hotel $hotel, string $paymentMode): array
+    {
+        $mode = strtolower(trim($paymentMode));
+        $config = $this->paymentProviderConfig($hotel);
+
+        if ($mode === '') {
+            return [];
+        }
+
+        if (str_contains($mode, 'bank')) {
+            return $config['bank_providers'];
+        }
+
+        if (preg_match('/mobile|m-pesa|mpesa|wallet|tigo|airtel|halopesa|upi/', $mode)) {
+            return $config['mobile_payment_providers'];
+        }
+
+        return [];
+    }
+
+    public function paymentProviderLabel(string $paymentMode): string
+    {
+        return str_contains(strtolower($paymentMode), 'bank') ? 'Bank' : 'Mobile Payment Provider';
     }
 
     /** @return array<string, mixed> */
@@ -188,7 +265,9 @@ class HotelSettingsService
     {
         return [
             'segments' => ['Leisure', 'Corporate', 'Event', 'Walkin', 'OTA'],
-            'payment_modes' => ['Cash', 'Credit Card', 'UPI', 'Bank Transfer', 'Bill to Company', 'Prepaid'],
+            'payment_modes' => ['Cash', 'Credit Card', 'UPI', 'Bank Transfer', 'Mobile Payment', 'Bill to Company', 'Prepaid'],
+            'bank_providers' => ['CRDB Bank', 'NMB Bank', 'NBC Bank', 'Stanbic Bank', 'Equity Bank'],
+            'mobile_payment_providers' => ['M-Pesa', 'Tigo Pesa', 'Airtel Money', 'Halopesa'],
             'identity_types' => ['Passport', 'Drivers License', 'VoterID'],
             'expense_categories' => [
                 'Electricity Expenses', 'Staff Expenses', 'Purchases',
@@ -197,6 +276,44 @@ class HotelSettingsService
             'purposes' => [],
             'floors' => [],
             'channels' => [],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    public function defaultBar(): array
+    {
+        return [
+            'purchase_list' => $this->defaultDepartmentProcurement()['purchase_list'],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    public function defaultDepartmentProcurement(): array
+    {
+        return [
+            'purchase_list' => [
+                'recipient_emails' => [],
+                'recipient_staff_user_ids' => [],
+                'include_hotel_email' => true,
+                'budget_currency' => null,
+                'accountant_staff_user_ids' => [],
+                'default_vendor_id' => null,
+            ],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    public function defaultHr(): array
+    {
+        return [
+            'min_password_length' => 8,
+            'require_strong_password' => true,
+            'email_domain_hints' => [],
+            'staff_document_types' => [
+                ['key' => 'national_id', 'label' => 'National ID / Passport', 'required' => true, 'enabled' => true],
+                ['key' => 'employment_contract', 'label' => 'Employment contract', 'required' => false, 'enabled' => true],
+                ['key' => 'certificates', 'label' => 'Training certificates', 'required' => false, 'enabled' => false],
+            ],
         ];
     }
 
@@ -212,6 +329,12 @@ class HotelSettingsService
             'laundry' => 'Laundry',
             'pms-services' => 'PMS Service',
             'pms-category' => 'PMS Category',
+            'store-categories' => 'Store categories',
+            'hr' => 'HR & Staff',
+            'bar' => 'Bar',
+            'hk_procurement' => 'HK procurement',
+            'laundry_procurement' => 'Laundry procurement',
+            'reception_procurement' => 'Reception procurement',
             'be' => 'BE',
             'whatsapp' => 'WhatsApp',
         ];

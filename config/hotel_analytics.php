@@ -22,6 +22,18 @@ return [
     'daily_report' => [
         'title' => 'Daily Report',
         'parent_label' => 'Analytics',
+        'convert_mixed_currencies' => true,
+        'services' => [
+            ['key' => 'bar', 'label' => 'Bar'],
+            ['key' => 'laundry', 'label' => 'Laundry'],
+            ['key' => 'swimming', 'label' => 'Swimming'],
+            ['key' => 'conference', 'label' => 'Conference'],
+        ],
+    ],
+
+    'frankfurter' => [
+        'base_url' => 'https://api.frankfurter.dev',
+        'cache_seconds' => 3600,
     ],
 
     'trend_analysis' => [

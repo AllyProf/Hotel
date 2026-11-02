@@ -88,21 +88,15 @@ class CompanyDataService
                 ];
             }
 
-            $amount = (float) ($reservation->amount_after_tax ?? 0);
-            $paymentType = strtolower((string) ($payload['paymentType'] ?? $payload['payment_type'] ?? ''));
-            $isOutstanding = str_contains($paymentType, 'bill')
-                || str_contains($paymentType, 'company')
-                || str_contains($paymentType, 'credit');
+            $billed = (float) ($reservation->amount_after_tax ?? 0);
+            $paid = $reservation->effectiveAmountPaid();
+            $balance = $reservation->balanceDue();
 
-            $stats[$companyId]['billed'] += $amount;
+            $stats[$companyId]['billed'] += $billed;
+            $stats[$companyId]['payments'] += $paid;
+            $stats[$companyId]['outstanding'] += $balance;
             $stats[$companyId]['invoices']++;
             $stats[$companyId]['currency'] = strtoupper((string) ($reservation->currency ?: $stats[$companyId]['currency']));
-
-            if ($isOutstanding) {
-                $stats[$companyId]['outstanding'] += $amount;
-            } else {
-                $stats[$companyId]['payments'] += $amount;
-            }
         }
 
         return $stats;

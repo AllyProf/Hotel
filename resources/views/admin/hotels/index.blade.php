@@ -75,7 +75,7 @@
                           @csrf
                           <button type="submit" class="btn btn-sm btn-primary" title="Login as hotel admin"
                             data-title="Impersonate hotel?"
-                            data-text="You will be logged in as the admin for {{ $hotel->name }}."
+                            data-text="You will be logged in as the admin for {{ e($hotel->name) }}."
                             data-confirm="Yes, impersonate"
                             data-cancel="Cancel">
                             <i class="fa fa-user-secret"></i> Impersonate

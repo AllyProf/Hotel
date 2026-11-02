@@ -77,7 +77,7 @@
     .sv-dot.is-checked-in { background: #86efac; }
     .sv-dot.is-checking-out { background: #f87171; }
     .sv-dot.is-checked-out { background: #166534; }
-    .sv-dot.is-maintenance { background: #9ca3af; }
+    .sv-dot.is-maintenance { background: #ef4444; }
     .sv-dot.is-complimentary { background: #fde047; }
 
     .sv-stats {
@@ -101,13 +101,19 @@
       height: 28px;
       border-radius: 50%;
       background: var(--sv-brand);
-      color: #ffffff !important;
+      color: #fff !important;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       font-size: 12px;
       font-weight: 700;
       line-height: 1;
+    }
+
+    .sv-stat__badge,
+    .sv-date-badge,
+    .sv-type-day-badge {
+      -webkit-text-fill-color: #fff;
     }
 
     .sv-toolbar {
@@ -222,6 +228,15 @@
       min-width: 980px;
     }
 
+    .sv-grid-main .sv-col-room {
+      width: 148px;
+    }
+
+    .sv-grid-main .sv-col-day {
+      width: 118px;
+      min-width: 118px;
+    }
+
     .sv-col-room {
       width: 140px;
     }
@@ -246,6 +261,48 @@
       font-weight: 700;
       padding: 10px 8px;
       text-align: center;
+    }
+
+    /* Main grid: timeline header layout only (colours unchanged — brand red) */
+    .sv-grid-main .sv-table thead th {
+      padding: 12px 6px 20px;
+      position: relative;
+      vertical-align: bottom;
+    }
+
+    .sv-grid-main .sv-table thead th:first-child {
+      padding-left: 12px;
+      vertical-align: middle;
+    }
+
+    .sv-date-head {
+      line-height: 1.25;
+    }
+
+    .sv-date-head small {
+      display: block;
+      font-weight: 600;
+      opacity: 0.9;
+      font-size: 11px;
+    }
+
+    .sv-date-badge {
+      position: absolute;
+      left: 50%;
+      bottom: -11px;
+      transform: translateX(-50%);
+      min-width: 22px;
+      height: 22px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: var(--sv-brand);
+      color: #fff !important;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 22px;
+      text-align: center;
+      border: 2px solid #fff;
+      z-index: 2;
     }
 
     .sv-table thead th:first-child {
@@ -310,6 +367,48 @@
       color: #111;
       padding: 8px 10px;
       border-left: 3px solid var(--sv-brand);
+    }
+
+    .sv-grid-main .sv-room-type td {
+      background: #546e7a;
+      color: #fff;
+      border-color: #546e7a;
+      border-left: none;
+      padding: 9px 12px;
+    }
+
+    .sv-grid-main .sv-room-type__toggle {
+      color: #fff;
+    }
+
+    .sv-grid-main .sv-room-type__toggle:hover {
+      color: #eceff1;
+    }
+
+    .sv-type-metrics td {
+      background: #eceff1;
+      border-color: #dfe3e6;
+      padding: 5px 2px;
+      height: 30px;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    .sv-type-metrics-label {
+      background: #eceff1 !important;
+    }
+
+    .sv-type-day-badge {
+      display: inline-block;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 5px;
+      line-height: 20px;
+      border-radius: 999px;
+      background: var(--sv-brand);
+      color: #fff !important;
+      font-size: 10px;
+      font-weight: 700;
     }
 
     .sv-room-type__toggle {
@@ -379,6 +478,31 @@
       white-space: nowrap;
     }
 
+    .sv-grid-main .sv-room-label {
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      box-shadow: 1px 0 0 #d1d5db;
+    }
+
+    .sv-grid-main .sv-unit-row:nth-child(even) .sv-room-label,
+    .sv-grid-main .sv-unit-row:nth-child(even) .sv-cell {
+      background: #fafbfc;
+    }
+
+    .sv-room-label__meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .sv-room-label__status {
+      color: #aaa;
+      font-size: 12px;
+      width: 16px;
+      text-align: center;
+    }
+
     .sv-room-label__icon {
       color: #bbb;
       margin-right: 6px;
@@ -392,11 +516,48 @@
       position: relative;
     }
 
-    .sv-cell.is-maintenance {
-      background: #f3f4f6;
-      color: #6b7280;
+    .sv-grid-main .sv-cell {
+      height: 40px;
+      padding: 6px 1px;
+      background: #fff;
+    }
+
+    .sv-grid-main .sv-table td,
+    .sv-grid-main .sv-table th {
+      border-color: #e8edf1;
+    }
+
+    .sv-grid-main .sv-table tbody td.sv-cell {
+      border-left-color: #eef2f5;
+      border-right-color: #eef2f5;
+    }
+
+    .sv-cell.is-maintenance,
+    .sv-cell.sv-cell--maintenance {
+      background: #fecaca;
+      color: #991b1b;
       font-size: 11px;
+      font-weight: 700;
       text-align: center;
+      vertical-align: middle;
+    }
+
+    .sv-grid-main .sv-cell.sv-cell--maintenance {
+      background: #fff;
+      padding: 6px 3px;
+    }
+
+    .sv-grid-main .sv-maintenance-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      min-height: 28px;
+      border-radius: 14px;
+      background: #78909c;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
     }
 
     .sv-booking {
@@ -413,6 +574,72 @@
       border: 1px solid rgba(0, 0, 0, 0.08);
     }
 
+    /* Main timeline — reference-style dual-tone capsules (grid only) */
+    .sv-grid-main .sv-booking {
+      display: flex;
+      align-items: stretch;
+      min-height: 28px;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-size: 11px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: none;
+      background: transparent;
+      color: #111;
+      box-shadow: none;
+    }
+
+    .sv-grid-main .sv-booking__cap {
+      flex: 0 1 auto;
+      max-width: 46%;
+      min-width: 4.5em;
+      padding: 7px 10px;
+      font-weight: 700;
+      line-height: 1.15;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      background: #1b3d24;
+      color: #fff;
+      border: none;
+    }
+
+    .sv-grid-main .sv-booking__tail {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 7px 10px;
+      font-weight: 600;
+      line-height: 1.15;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+    }
+
+    .sv-grid-main .sv-booking.is-checked-in .sv-booking__tail,
+    .sv-grid-main .sv-booking.is-checked-out .sv-booking__tail {
+      background: #81c784;
+      color: #1b5e20;
+    }
+
+    .sv-grid-main .sv-booking.is-assigned .sv-booking__tail,
+    .sv-grid-main .sv-booking.is-complimentary .sv-booking__tail {
+      background: #f4aba8;
+      color: #5d4037;
+    }
+
+    .sv-grid-main .sv-booking.is-checking-out .sv-booking__tail {
+      background: #ffcdd2;
+      color: #4e342e;
+    }
+
+    .sv-grid-main .sv-booking.is-checking-out--solo .sv-booking__cap {
+      max-width: 46%;
+    }
+
     .sv-booking.is-assigned { background: #fce7f3; border-color: #f9a8d4; }
     .sv-booking.is-checked-in { background: #dcfce7; border-color: #86efac; }
     .sv-booking.is-checking-out { background: #fee2e2; border-color: #fca5a5; }
@@ -422,7 +649,7 @@
     .sv-summary-row th,
     .sv-summary-row td {
       background: var(--sv-brand-dark);
-      color: #fff;
+      color: #fff !important;
       font-size: 12px;
       font-weight: 700;
       padding: 9px 8px;
@@ -483,7 +710,7 @@
 
     .sv-footer-row td {
       background: var(--sv-brand);
-      color: #fff;
+      color: #fff !important;
       font-weight: 700;
       font-size: 13px;
       text-align: center;
@@ -575,6 +802,26 @@
           </button>
         </form>
 
+        @if(app()->environment('local', 'testing') && config('hotel_pms.stay_view.allow_sample_bookings', true))
+          <form method="POST" action="{{ route('hotel.stay-view.sample-bookings') }}" class="d-inline mb-0">
+            @csrf
+            <input type="hidden" name="start" value="{{ $start->format('Y-m-d') }}">
+            <button type="submit" class="sv-icon-btn" title="Generate sample room bookings for this week">
+              <i class="fa fa-users"></i>
+            </button>
+          </form>
+          @if(! empty($grid['has_sample_bookings']))
+            <form method="POST" action="{{ route('hotel.stay-view.sample-bookings.clear') }}" class="d-inline mb-0 js-sv-clear-sample-form">
+              @csrf
+              @method('DELETE')
+              <input type="hidden" name="start" value="{{ $start->format('Y-m-d') }}">
+              <button type="submit" class="sv-icon-btn" title="Remove sample bookings">
+                <i class="fa fa-times"></i>
+              </button>
+            </form>
+          @endif
+        @endif
+
         <button type="button" class="sv-icon-btn js-sv-search-toggle" title="Search" aria-expanded="false">
           <i class="fa fa-search"></i>
         </button>
@@ -585,6 +832,16 @@
       </div>
 
       <div class="sv-date-nav">
+        @php
+          $cashBookTo = $start->copy()->addDays(\App\Services\StayViewService::WINDOW_DAYS - 1);
+        @endphp
+        <a href="{{ route('hotel.stay-view.cash-book', [
+          'from_date' => $start->format('Y-m-d'),
+          'to_date' => $cashBookTo->format('Y-m-d'),
+          'stay_start' => $start->format('Y-m-d'),
+        ]) }}" class="sv-icon-btn" title="Expenses (cash book)">
+          <i class="fa fa-usd"></i>
+        </a>
         <a href="{{ route('hotel.stay-view', ['start' => $prevStart->format('Y-m-d')]) }}" class="sv-icon-btn" title="Previous week">&laquo;</a>
         <form method="GET" action="{{ route('hotel.stay-view') }}" class="d-inline mb-0">
           <input type="date" class="form-control form-control-sm sv-date-input" name="start"
@@ -594,8 +851,18 @@
       </div>
     </div>
 
+    @if(! empty($grid['has_sample_bookings']))
+      <p class="mb-0 px-3 py-2 text-muted small border-bottom bg-light">
+        Sample bookings are loaded for this hotel (IDs <code>STAYVIEW-DEMO-*</code>). Use the <i class="fa fa-times"></i> toolbar button to remove them.
+      </p>
+    @elseif(! empty($grid['is_demo']))
+      <p class="mb-0 px-3 py-2 text-muted small border-bottom bg-light">
+        Preview guests only — click <i class="fa fa-users"></i> in the toolbar to save sample bookings to the database.
+      </p>
+    @endif
+
     <div class="sv-scroll">
-      <div class="sv-table-stack">
+      <div class="sv-table-stack sv-grid-main">
         <table class="sv-table" id="svTable">
           <colgroup>
             <col class="sv-col-room">
@@ -607,9 +874,15 @@
             <tr>
               <th>Rooms</th>
               @foreach($grid['dates'] as $date)
+                @php $dateKey = $date->format('Y-m-d'); @endphp
                 <th>
-                  {{ $date->format('d M') }}<br>
-                  <small>{{ $date->format('D') }}</small>
+                  <div class="sv-date-head">
+                    {{ $date->format('d M') }}
+                    <small>{{ $date->format('D') }}</small>
+                  </div>
+                  @if(($grid['date_header_counts'][$dateKey] ?? 0) > 0)
+                    <span class="sv-date-badge" title="Arrivals">{{ $grid['date_header_counts'][$dateKey] }}</span>
+                  @endif
                 </th>
               @endforeach
             </tr>
@@ -633,6 +906,17 @@
                     </button>
                     {{ $roomType['name'] }}
                   </td>
+                </tr>
+                <tr class="sv-type-metrics">
+                  <td class="sv-type-metrics-label"></td>
+                  @foreach($grid['date_keys'] as $dateKey)
+                    <td>
+                      @php $typeCount = (int) ($roomType['date_counts'][$dateKey] ?? 0); @endphp
+                      @if($typeCount > 0)
+                        <span class="sv-type-day-badge" title="Stays this day">{{ $typeCount }}</span>
+                      @endif
+                    </td>
+                  @endforeach
                 </tr>
               </tbody>
             </table>
@@ -658,17 +942,35 @@
                     @endphp
                     <tr class="sv-unit-row js-sv-unit-row" data-search="{{ strtolower(implode(' ', array_filter($searchBits))) }}">
                       <td class="sv-room-label">
-                        <i class="fa fa-th sv-room-label__icon"></i>{{ $unit['label'] }}
+                        <span class="sv-room-label__meta">
+                          <span>{{ $unit['label'] }}</span>
+                          <span class="sv-room-label__status" aria-hidden="true">
+                            @if(($unit['status'] ?? '') === \App\Models\HotelRoomUnit::STATUS_MAINTENANCE)
+                              <i class="fa fa-wrench" title="Maintenance"></i>
+                            @else
+                              <i class="fa fa-ellipsis-h"></i>
+                            @endif
+                          </span>
+                        </span>
                       </td>
                       @foreach($unit['cells'] as $cell)
                         @if(($cell['type'] ?? '') === 'booking')
-                          <td class="sv-cell" colspan="{{ $cell['colspan'] ?? 1 }}">
-                            <div class="sv-booking is-{{ $cell['status'] ?? 'assigned' }}" title="{{ $cell['status_label'] ?? 'Assigned' }} · {{ $cell['channel'] ?? '' }}">
-                              {{ $cell['guest'] ?? 'Guest' }}
+                          @php $span = (int) ($cell['colspan'] ?? 1); @endphp
+                          @php
+                            $status = $cell['status'] ?? 'assigned';
+                            $guest = $cell['guest'] ?? 'Guest';
+                            $soloCheckout = $status === 'checking-out';
+                          @endphp
+                          <td class="sv-cell" colspan="{{ $span }}">
+                            <div class="sv-booking is-{{ $status }} @if($soloCheckout) is-checking-out--solo @endif" title="{{ $cell['status_label'] ?? 'Assigned' }} · {{ $cell['channel'] ?? '' }}">
+                              <span class="sv-booking__cap">{{ $guest }}</span>
+                              <span class="sv-booking__tail" aria-hidden="true"></span>
                             </div>
                           </td>
                         @elseif(($cell['type'] ?? '') === 'maintenance')
-                          <td class="sv-cell is-maintenance">Maintenance</td>
+                          <td class="sv-cell sv-cell--maintenance" colspan="{{ $cell['colspan'] ?? 1 }}">
+                            <div class="sv-maintenance-bar">{{ $cell['label'] ?? 'Out of Order' }}</div>
+                          </td>
                         @else
                           <td class="sv-cell"></td>
                         @endif

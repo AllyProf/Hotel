@@ -216,7 +216,8 @@
         }
 
         tableBody.innerHTML = companies.map(function (company) {
-          return '<tr data-company-id="' + company.id + '" data-company-name="' + escapeHtml(company.name) + '">' +
+          var ratesMap = company.contracted_rates_map || {};
+          return '<tr data-company-id="' + company.id + '" data-company-name="' + escapeHtml(company.name) + '" data-company-email="' + escapeHtml(company.email) + '" data-company-contact="' + escapeHtml(company.contact_person || '') + '" data-company-phone="' + escapeHtml(company.phone || '') + '" data-contracted-rates="' + escapeHtml(JSON.stringify(ratesMap)) + '">' +
             '<td><input type="radio" name="res_company_pick" value="' + company.id + '"></td>' +
             '<td><strong>' + escapeHtml(company.name) + '</strong></td>' +
             '<td>' + escapeHtml(company.email) + '</td>' +
@@ -243,6 +244,7 @@
       function selectCompany(row) {
         var id = row.getAttribute('data-company-id');
         var name = row.getAttribute('data-company-name');
+        var email = row.getAttribute('data-company-email') || '';
 
         tableBody.querySelectorAll('tr').forEach(function (tr) {
           tr.classList.remove('is-selected');
@@ -254,6 +256,22 @@
 
         if (billToInput) billToInput.value = name || '';
         if (billToCompanyId) billToCompanyId.value = id || '';
+
+        var ratesMap = {};
+        try {
+          ratesMap = JSON.parse(row.getAttribute('data-contracted-rates') || '{}');
+        } catch (e) {}
+
+        if (typeof window.onGbCompanySelected === 'function') {
+          window.onGbCompanySelected({
+            id: id,
+            name: name,
+            email: email,
+            contact_person: row.getAttribute('data-company-contact') || '',
+            phone: row.getAttribute('data-company-phone') || '',
+            contracted_rates_map: ratesMap
+          });
+        }
 
         $('#resSelectCompanyModal').modal('hide');
       }

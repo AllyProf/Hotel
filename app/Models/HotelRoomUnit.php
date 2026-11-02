@@ -9,6 +9,10 @@ class HotelRoomUnit extends Model
 {
     public const STATUS_AVAILABLE = 'available';
 
+    public const STATUS_DIRTY = 'dirty';
+
+    public const STATUS_CLEANED = 'cleaned';
+
     public const STATUS_MAINTENANCE = 'maintenance';
 
     public const STATUS_INACTIVE = 'inactive';
@@ -40,5 +44,19 @@ class HotelRoomUnit extends Model
     public function displayLabel(): string
     {
         return $this->label ?: ($this->room_number ?: '—');
+    }
+
+    /** e.g. 100-single for HK consumption room picker */
+    public function consumptionLabel(): string
+    {
+        $num = trim((string) ($this->room_number ?? ''));
+        if ($num === '') {
+            return $this->displayLabel();
+        }
+
+        $typeName = $this->roomType?->display_name ?: $this->roomType?->name ?: 'room';
+        $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '', (string) $typeName)) ?: 'room';
+
+        return $num.'-'.$slug;
     }
 }

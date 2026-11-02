@@ -7,7 +7,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class HotelSetting extends Model
 {
-    protected $fillable = ['hotel_id', 'pms', 'be', 'rateplan', 'whatsapp', 'laundry', 'reservation', 'integrations', 'custom_amenities'];
+    protected $fillable = [
+        'hotel_id', 'pms', 'be', 'rateplan', 'whatsapp', 'laundry', 'reservation', 'hr', 'bar',
+        'hk_procurement', 'laundry_procurement', 'reception_procurement',
+        'integrations', 'custom_amenities',
+    ];
 
     protected function casts(): array
     {
@@ -18,6 +22,11 @@ class HotelSetting extends Model
             'whatsapp' => 'array',
             'laundry' => 'array',
             'reservation' => 'array',
+            'hr' => 'array',
+            'bar' => 'array',
+            'hk_procurement' => 'array',
+            'laundry_procurement' => 'array',
+            'reception_procurement' => 'array',
             'integrations' => 'array',
             'custom_amenities' => 'array',
         ];

@@ -25,7 +25,7 @@ class UpdateRatesController extends Controller
 
     public function index(Request $request): View
     {
-        $hotel = auth()->user()->hotel()->with(['rooms', 'ratePlans.room', 'settings'])->firstOrFail();
+        $hotel = auth()->user()->hotel()->with(['ratePlans.room', 'settings'])->firstOrFail();
         $this->settingsService->ensureDefaults($hotel);
 
         if ($request->input('view') === 'calendar') {
@@ -34,15 +34,22 @@ class UpdateRatesController extends Controller
 
         $startDate = $this->resolveStartDate($request->input('start_date'));
         $grid = $this->rateInventory->calendarGrid($hotel, $startDate);
+        $windowDays = RoomInventoryService::WINDOW_DAYS;
 
         return view('hotel.channel-manager.update-rates', [
-            'hotel' => $hotel,
             'startDate' => $startDate->format('Y-m-d'),
             'startDateLabel' => $startDate->format('d M y'),
-            'windowDays' => RoomInventoryService::WINDOW_DAYS,
+            'prevStartDate' => $startDate->copy()->subDays($windowDays)->format('Y-m-d'),
+            'nextStartDate' => $startDate->copy()->addDays($windowDays)->format('Y-m-d'),
+            'calendarMonth' => $startDate->format('Y-m'),
+            'calendarViewUrl' => route('hotel.channel-manager.update-rates', [
+                'view' => 'calendar',
+                'month' => $startDate->format('Y-m'),
+            ]),
+            'ratesIndexUrl' => route('hotel.channel-manager.update-rates'),
+            'windowDays' => $windowDays,
             'grid' => $grid,
             'otas' => $this->otaConnections->configured($hotel),
-            'hasConfiguredOtas' => count($this->otaConnections->configuredSlugs($hotel)) > 0,
         ]);
     }
 

@@ -31,7 +31,7 @@ class IntegrationController extends Controller
         $this->integrations->updateBookingEngine($hotel, $settings, $validated);
 
         return redirect()
-            ->to(route('hotel.dashboard').'#be-integration')
+            ->route('hotel.booking-engine.live-link')
             ->with('success', 'Direct booking settings saved.');
     }
 }

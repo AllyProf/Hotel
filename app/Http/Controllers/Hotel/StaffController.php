@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Hotel;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\HotelRoleService;
+use App\Services\Hr\HotelHrService;
+use App\Services\StaffProfileService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -12,16 +14,20 @@ use Illuminate\View\View;
 
 class StaffController extends Controller
 {
-    public function __construct(private HotelRoleService $roles) {}
+    public function __construct(
+        private HotelRoleService $roles,
+        private HotelHrService $hr,
+        private StaffProfileService $staffProfile,
+    ) {}
 
     public function index(): View
     {
         $hotel = auth()->user()->hotel()->with('plan')->first();
-        $this->roles->ensureDefaults($hotel);
+        $this->hr->ensureDefaults($hotel);
 
         $staff = $hotel->users()
             ->where('role', User::ROLE_HOTEL_STAFF)
-            ->with(['hotelRole', 'branch'])
+            ->with(['hotelRole', 'branch', 'department'])
             ->latest()
             ->paginate(10);
 
@@ -38,16 +44,20 @@ class StaffController extends Controller
         $hotel = auth()->user()->hotel;
         $validated = $this->validateStaff($request);
 
-        $hotel->users()->create([
+        $staff = $hotel->users()->create([
             'name' => $validated['name'],
             'email' => $validated['email'],
             'phone' => $validated['phone'] ?? null,
+            'phone_country_code' => $validated['phone_country_code'] ?? null,
             'password' => $validated['password'],
             'role' => User::ROLE_HOTEL_STAFF,
             'hotel_role_id' => $validated['hotel_role_id'],
+            'hotel_department_id' => $validated['hotel_department_id'] ?? null,
             'branch_id' => $validated['branch_id'] ?? null,
             'is_active' => $request->boolean('is_active', true),
         ]);
+
+        $this->staffProfile->syncDocuments($hotel, $staff, $request);
 
         return redirect()
             ->route('hotel.staff.index')
@@ -57,6 +67,7 @@ class StaffController extends Controller
     public function edit(User $staff): View
     {
         $this->authorizeStaff($staff);
+        $staff->load('staffDocuments');
 
         return view('hotel.staff.edit', array_merge($this->formData(), compact('staff')));
     }
@@ -70,7 +81,9 @@ class StaffController extends Controller
             'name' => $validated['name'],
             'email' => $validated['email'],
             'phone' => $validated['phone'] ?? null,
+            'phone_country_code' => $validated['phone_country_code'] ?? null,
             'hotel_role_id' => $validated['hotel_role_id'],
+            'hotel_department_id' => $validated['hotel_department_id'] ?? null,
             'branch_id' => $validated['branch_id'] ?? null,
             'is_active' => $request->boolean('is_active', true),
         ]);
@@ -78,6 +91,8 @@ class StaffController extends Controller
         if (! empty($validated['password'])) {
             $staff->update(['password' => $validated['password']]);
         }
+
+        $this->staffProfile->syncDocuments($hotel = auth()->user()->hotel, $staff, $request);
 
         return redirect()
             ->route('hotel.staff.index')
@@ -98,11 +113,17 @@ class StaffController extends Controller
     private function formData(): array
     {
         $hotel = auth()->user()->hotel()->with('plan')->first();
+        $this->hr->ensureDefaults($hotel);
 
         return [
             'hotel' => $hotel,
             'roles' => $hotel->roles()->orderBy('name')->get(),
+            'departments' => $this->hr->departments($hotel)->where('is_active', true),
             'branches' => $hotel->supportsMultiBranch() ? $hotel->branches()->orderBy('name')->get() : collect(),
+            'hrSettings' => $this->staffProfile->hrSettings($hotel),
+            'emailDatalistOptions' => $this->staffProfile->emailDatalistOptions($hotel),
+            'emailDomains' => $this->staffProfile->emailSuggestions($hotel),
+            'documentTypes' => $this->staffProfile->enabledDocumentTypes($hotel),
         ];
     }
 
@@ -110,8 +131,9 @@ class StaffController extends Controller
     private function validateStaff(Request $request, ?User $staff = null): array
     {
         $hotelId = auth()->user()->hotel_id;
+        $hotel = auth()->user()->hotel;
 
-        return $request->validate([
+        $rules = array_merge([
             'name' => ['required', 'string', 'max:255'],
             'email' => [
                 'required',
@@ -120,16 +142,23 @@ class StaffController extends Controller
                 Rule::unique('users', 'email')->ignore($staff?->id),
             ],
             'phone' => ['nullable', 'string', 'max:30'],
-            'password' => [$staff ? 'nullable' : 'required', 'string', 'min:8', 'confirmed'],
+            'phone_country_code' => ['nullable', 'string', 'max:8'],
+            'password' => $this->staffProfile->passwordValidationRules($hotel, (bool) $staff),
             'hotel_role_id' => [
                 'required',
                 Rule::exists('hotel_roles', 'id')->where('hotel_id', $hotelId),
+            ],
+            'hotel_department_id' => [
+                'nullable',
+                Rule::exists('hotel_departments', 'id')->where('hotel_id', $hotelId),
             ],
             'branch_id' => [
                 'nullable',
                 Rule::exists('branches', 'id')->where('hotel_id', $hotelId),
             ],
-        ]);
+        ], $this->staffProfile->validationRulesForDocuments($hotel, (bool) $staff, $staff));
+
+        return $request->validate($rules);
     }
 
     private function authorizeStaff(User $staff): void

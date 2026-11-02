@@ -6,7 +6,11 @@
         <input type="hidden" name="from_date" value="{{ $filters['from_date'] }}">
         <input type="hidden" name="to_date" value="{{ $filters['to_date'] }}">
         <input type="hidden" name="filter_payment_type" value="{{ $filters['payment_type'] }}">
-        <input type="hidden" name="filter_paid_type" value="{{ $filters['paid_type'] }}">
+        <input type="hidden" name="filter_paid_type" value="{{ $filters['paid_type'] ?? '' }}">
+        @if(! empty($cashBook))
+          <input type="hidden" name="redirect" value="cash_book">
+          <input type="hidden" name="stay_start" value="{{ request('stay_start') }}">
+        @endif
 
         <div class="modal-header ex-modal__header">
           <h5 class="modal-title">Deposit</h5>

@@ -13,6 +13,7 @@ class HotelPaymentLink extends Model
 
     protected $fillable = [
         'hotel_id',
+        'cm_reservation_id',
         'email',
         'phone',
         'amount',
@@ -34,5 +35,10 @@ class HotelPaymentLink extends Model
     public function hotel(): BelongsTo
     {
         return $this->belongsTo(Hotel::class);
+    }
+
+    public function reservation(): BelongsTo
+    {
+        return $this->belongsTo(CmReservation::class, 'cm_reservation_id');
     }
 }

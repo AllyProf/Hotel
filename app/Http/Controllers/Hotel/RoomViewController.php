@@ -66,4 +66,54 @@ class RoomViewController extends Controller
             ->route('hotel.room-view', ['date' => $date->format('Y-m-d')])
             ->with($result['success'] ? 'success' : 'warning', $result['message']);
     }
+
+    public function markClean(Request $request, int $unit): RedirectResponse
+    {
+        $hotel = auth()->user()->hotel()->firstOrFail();
+        $date = $request->filled('date')
+            ? Carbon::parse($request->input('date'))->startOfDay()
+            : now()->startOfDay();
+
+        try {
+            $this->roomView->markUnitClean($hotel, $unit);
+        } catch (\InvalidArgumentException $e) {
+            return redirect()
+                ->route('hotel.room-view', ['date' => $date->format('Y-m-d')])
+                ->with('warning', $e->getMessage());
+        }
+
+        $this->logs->record($hotel, [
+            'action_type' => 'Room Marked Clean',
+            'details' => 'Room unit #'.$unit.' marked clean from room view.',
+        ]);
+
+        return redirect()
+            ->route('hotel.room-view', ['date' => $date->format('Y-m-d')])
+            ->with('success', 'Room marked cleaned.');
+    }
+
+    public function markAvailable(Request $request, int $unit): RedirectResponse
+    {
+        $hotel = auth()->user()->hotel()->firstOrFail();
+        $date = $request->filled('date')
+            ? Carbon::parse($request->input('date'))->startOfDay()
+            : now()->startOfDay();
+
+        try {
+            $this->roomView->markUnitAvailable($hotel, $unit);
+        } catch (\InvalidArgumentException $e) {
+            return redirect()
+                ->route('hotel.room-view', ['date' => $date->format('Y-m-d')])
+                ->with('warning', $e->getMessage());
+        }
+
+        $this->logs->record($hotel, [
+            'action_type' => 'Room Marked Available',
+            'details' => 'Room unit #'.$unit.' released to inventory after cleaning.',
+        ]);
+
+        return redirect()
+            ->route('hotel.room-view', ['date' => $date->format('Y-m-d')])
+            ->with('success', 'Room is now available.');
+    }
 }

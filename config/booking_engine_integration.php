@@ -8,8 +8,8 @@ return [
                 'number' => 1,
                 'title' => 'Configure rooms & rate plans',
                 'body' => 'Set up room types, rate plans, amenities, and policies under Live Hotel Settings. These feed your public booking engine.',
-                'route' => 'hotel.settings.index',
-                'route_params' => ['tab' => 'be'],
+                'route' => 'hotel.booking-engine.website-config',
+                'route_params' => [],
                 'label' => 'Open BE Settings',
             ],
             [

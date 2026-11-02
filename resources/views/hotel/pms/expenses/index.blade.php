@@ -172,6 +172,27 @@
       border-color: var(--ex-brand) !important;
       color: #fff !important;
     }
+
+    .js-ex-expense-submit:disabled,
+    .js-ex-deposit-submit:disabled {
+      background: #adb5bd !important;
+      border-color: #adb5bd !important;
+      color: #fff !important;
+      opacity: 1;
+    }
+
+    #exAddExpenseModal .control-label,
+    #exDepositModal .control-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #444;
+    }
+
+    #exAddExpenseModal .modal-footer,
+    #exDepositModal .modal-footer {
+      border-top: none;
+      padding-top: 0;
+    }
   </style>
 @endpush
 
@@ -265,8 +286,15 @@
                       <td>{{ $expense->category ?: '—' }}</td>
                       <td>{{ number_format((float) $expense->amount, 2) }}</td>
                       <td>{{ $expense->vendor ?: '—' }}</td>
-                      <td>{{ $expense->invoice_no ?: '—' }}</td>
-                      <td>{{ \Illuminate\Support\Str::limit($expense->comments ?: '—', 40) }}</td>
+                      <td>
+                        {{ $expense->invoice_no ?: '—' }}
+                        @if($expense->isLinkedPurchaseOrderPayment())
+                          <div class="small"><a href="{{ route('hotel.accounts.index', ['tab' => 'payables', 'search' => $expense->purchaseOrder->po_number]) }}">PO payment</a></div>
+                        @elseif($expense->isLinkedPurchaseOrderBudgetReturn())
+                          <div class="small text-success">Budget return</div>
+                        @endif
+                      </td>
+                      <td title="{{ $expense->comments ?: '' }}">{{ \Illuminate\Support\Str::limit($expense->comments ?: '—', 40) }}</td>
                     </tr>
                   @endforeach
                 </tbody>
@@ -278,6 +306,7 @@
     </div>
   </div>
 
+  @php $cashBook = false; @endphp
   @include('hotel.pms.expenses.partials._add-expense-modal')
   @include('hotel.pms.expenses.partials._deposit-modal')
 @endsection

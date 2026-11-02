@@ -27,6 +27,7 @@ class HotelExpense extends Model
 
     protected $fillable = [
         'hotel_id',
+        'hotel_purchase_order_id',
         'entry_type',
         'paid_type',
         'payment_type',
@@ -37,6 +38,9 @@ class HotelExpense extends Model
         'vendor',
         'comments',
         'details_path',
+        'pos_label',
+        'guest_name',
+        'room_no',
     ];
 
     protected function casts(): array
@@ -50,6 +54,21 @@ class HotelExpense extends Model
     public function hotel(): BelongsTo
     {
         return $this->belongsTo(Hotel::class);
+    }
+
+    public function purchaseOrder(): BelongsTo
+    {
+        return $this->belongsTo(HotelPurchaseOrder::class, 'hotel_purchase_order_id');
+    }
+
+    public function isLinkedPurchaseOrderPayment(): bool
+    {
+        return $this->hotel_purchase_order_id !== null && $this->paid_type === self::PAID_OUT;
+    }
+
+    public function isLinkedPurchaseOrderBudgetReturn(): bool
+    {
+        return $this->hotel_purchase_order_id !== null && $this->paid_type === self::PAID_IN;
     }
 
     public function paymentTypeLabel(): string

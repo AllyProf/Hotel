@@ -137,7 +137,7 @@
   <div class="col-md-3">
     <div class="form-group">
       <label class="control-label">Payment Mode</label>
-      <select class="form-control @error('payment_mode') is-invalid @enderror" name="payment_mode">
+      <select class="form-control js-res-payment-mode @error('payment_mode') is-invalid @enderror" name="payment_mode">
         @foreach($options['payment_modes'] as $mode)
           <option value="{{ $mode }}" {{ old('payment_mode', $options['default_payment_mode'] ?? '') === $mode ? 'selected' : '' }}>
             {{ $mode }}
@@ -145,6 +145,15 @@
         @endforeach
       </select>
       @error('payment_mode')<div class="invalid-feedback">{{ $message }}</div>@enderror
+    </div>
+  </div>
+  <div class="col-md-3 js-res-payment-provider-wrap d-none">
+    <div class="form-group">
+      <label class="control-label js-res-payment-provider-label">Provider</label>
+      <select class="form-control js-res-payment-provider @error('payment_provider') is-invalid @enderror" name="payment_provider">
+        <option value="">Select provider</option>
+      </select>
+      @error('payment_provider')<div class="invalid-feedback">{{ $message }}</div>@enderror
     </div>
   </div>
   <div class="col-md-3">
@@ -174,15 +183,16 @@
       <label class="animated-checkbox mt-2">
         <input type="checkbox" name="tax_inclusive" value="1" class="js-res-tax-inclusive"
           {{ old('tax_inclusive', true) ? 'checked' : '' }}>
-        <span class="label-text">Tax Inclusive</span>
+        <span class="label-text">Tax Inclusive (VAT {{ number_format($options['vat_rate'] ?? 18, 2) }}%)</span>
       </label>
     </div>
   </div>
   <div class="col-md-3">
     <div class="form-group">
-      <label class="control-label">Per day avg Tax</label>
+      <label class="control-label">Per day VAT</label>
       <input type="number" step="0.01" min="0" class="form-control js-res-daily-tax @error('daily_tax') is-invalid @enderror"
         name="daily_tax" value="{{ old('daily_tax', 0) }}">
+      <small class="text-muted js-res-daily-tax-hint">Auto-calculated from settings VAT rate.</small>
       @error('daily_tax')<div class="invalid-feedback">{{ $message }}</div>@enderror
     </div>
   </div>
@@ -201,6 +211,21 @@
         @endforeach
       </select>
       @error('room_unit_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-md-12">
+    <div class="alert alert-light border mb-0 js-res-pricing-summary">
+      <strong>Booking total:</strong>
+      <span class="js-res-total-gross">0</span>
+      <span class="js-res-currency-label">{{ $currency }}</span>
+      <span class="text-muted mx-2">|</span>
+      Room: <span class="js-res-total-net">0</span>
+      <span class="text-muted mx-2">|</span>
+      VAT (<span class="js-res-vat-rate">{{ number_format($options['vat_rate'] ?? 18, 2) }}</span>%):
+      <span class="js-res-total-vat">0</span>
     </div>
   </div>
 </div>
@@ -286,15 +311,7 @@
       @error('guest_city')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
     </div>
   </div>
-  <div class="col-md-2">
-    <div class="form-group">
-      <label class="control-label">Zip</label>
-      <input type="text" class="form-control @error('guest_zip') is-invalid @enderror" name="guest_zip"
-        value="{{ old('guest_zip') }}">
-      @error('guest_zip')<div class="invalid-feedback">{{ $message }}</div>@enderror
-    </div>
-  </div>
-  <div class="col-md-4">
+  <div class="col-md-6">
     <div class="form-group">
       <label class="control-label">Address</label>
       <input type="text" class="form-control @error('guest_address') is-invalid @enderror" name="guest_address"
@@ -351,3 +368,8 @@
 </label>
 
 <script type="application/json" id="res-room-data">@json($options['rooms'])</script>
+<script type="application/json" id="res-pricing-config">@json([
+  'vat_rate' => (float) ($options['vat_rate'] ?? 18),
+])</script>
+<script type="application/json" id="res-payment-provider-config">@json($options['payment_provider_config'] ?? ['bank_providers' => [], 'mobile_payment_providers' => []])</script>
+<script type="application/json" id="res-old-payment-provider">@json(old('payment_provider'))</script>

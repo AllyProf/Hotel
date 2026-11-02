@@ -17,6 +17,10 @@ class HotelVendor extends Model
         'email',
         'state',
         'address',
+        'account_name',
+        'account_no',
+        'bank_name',
+        'ifsc_code',
     ];
 
     public function hotel(): BelongsTo

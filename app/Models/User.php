@@ -26,8 +26,10 @@ class User extends Authenticatable
         'role',
         'hotel_id',
         'hotel_role_id',
+        'hotel_department_id',
         'branch_id',
         'phone',
+        'phone_country_code',
         'is_active',
     ];
 
@@ -50,6 +52,16 @@ class User extends Authenticatable
         return $this->belongsTo(HotelRole::class);
     }
 
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(HotelDepartment::class, 'hotel_department_id');
+    }
+
+    public function staffDocuments(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(HotelStaffDocument::class);
+    }
+
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
@@ -68,6 +80,12 @@ class User extends Authenticatable
     public function isHotelAdmin(): bool
     {
         return $this->role === self::ROLE_HOTEL_ADMIN;
+    }
+
+    /** Hotel admin / platform owner — full access to ERP workflows (bar recipient, accountant, etc.). */
+    public function hasFullHotelAccess(): bool
+    {
+        return $this->isPlatformOwner() || $this->isHotelAdmin();
     }
 
     public function isHotelStaff(): bool
